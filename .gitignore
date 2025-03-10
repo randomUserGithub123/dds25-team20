@@ -1,0 +1,39 @@
+# compiled
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+
+# virtual env
+venv/
+.env
+
+# flask
+instance/
+*.log
+
+# redis
+dump.rdb
+appendonly.aof
+
+# env vars
+.env
+*.env
+config.json
+settings.py
+
+# ide
+.vscode/
+*.swp
+*.swo
+*.idea/
+*.iml
+
+# package manager
+pip-log.txt
+pip-delete-this-directory.txt
+
+# cache
+.cache/
+.pytest_cache/

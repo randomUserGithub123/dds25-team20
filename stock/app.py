@@ -8,15 +8,39 @@ import redis
 from msgspec import msgpack, Struct
 from flask import Flask, jsonify, abort, Response
 
+STOCK_UPDATED = "StockUpdated"
+STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
 
 DB_ERROR_STR = "DB error"
 
 app = Flask("stock-service")
 
-db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
-                              port=int(os.environ['REDIS_PORT']),
-                              password=os.environ['REDIS_PASSWORD'],
-                              db=int(os.environ['REDIS_DB']))
+db: redis.Redis = redis.Redis(
+    host=os.environ["REDIS_HOST"],
+    port=int(os.environ["REDIS_PORT"]),
+    password=os.environ["REDIS_PASSWORD"],
+    db=int(os.environ["REDIS_DB"]),
+)
+
+pubsub = db.pubsub()
+
+
+def publish(event: str, data: dict):
+    db.publish(event, msgpack.encode(data))
+
+
+def event_listener():
+    pubsub.subscribe(STOCK_UPDATE_REQUESTED)
+    for message in pubsub.listen():
+        if message["type"] == "message":
+            # channel = message["channel"].decode()
+            data = msgpack.decode(message["data"])
+            handle_stock_update_requested(data)
+
+
+def handle_stock_update_requested(data: dict):
+    # TODO
+    pass
 
 
 def close_db_connection():
@@ -45,7 +69,7 @@ def get_item_from_db(item_id: str) -> StockValue | None:
     return entry
 
 
-@app.post('/item/create/<price>')
+@app.post("/item/create/<price>")
 def create_item(price: int):
     key = str(uuid.uuid4())
     app.logger.debug(f"Item: {key} created")
@@ -54,16 +78,18 @@ def create_item(price: int):
         db.set(key, value)
     except redis.exceptions.RedisError:
         return abort(400, DB_ERROR_STR)
-    return jsonify({'item_id': key})
+    return jsonify({"item_id": key})
 
 
-@app.post('/batch_init/<n>/<starting_stock>/<item_price>')
+@app.post("/batch_init/<n>/<starting_stock>/<item_price>")
 def batch_init_users(n: int, starting_stock: int, item_price: int):
     n = int(n)
     starting_stock = int(starting_stock)
     item_price = int(item_price)
-    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(StockValue(stock=starting_stock, price=item_price))
-                                  for i in range(n)}
+    kv_pairs: dict[str, bytes] = {
+        f"{i}": msgpack.encode(StockValue(stock=starting_stock, price=item_price))
+        for i in range(n)
+    }
     try:
         db.mset(kv_pairs)
     except redis.exceptions.RedisError:
@@ -71,18 +97,13 @@ def batch_init_users(n: int, starting_stock: int, item_price: int):
     return jsonify({"msg": "Batch init for stock successful"})
 
 
-@app.get('/find/<item_id>')
+@app.get("/find/<item_id>")
 def find_item(item_id: str):
     item_entry: StockValue = get_item_from_db(item_id)
-    return jsonify(
-        {
-            "stock": item_entry.stock,
-            "price": item_entry.price
-        }
-    )
+    return jsonify({"stock": item_entry.stock, "price": item_entry.price})
 
 
-@app.post('/add/<item_id>/<amount>')
+@app.post("/add/<item_id>/<amount>")
 def add_stock(item_id: str, amount: int):
     item_entry: StockValue = get_item_from_db(item_id)
     # update stock, serialize and update database
@@ -94,7 +115,7 @@ def add_stock(item_id: str, amount: int):
     return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
 
 
-@app.post('/subtract/<item_id>/<amount>')
+@app.post("/subtract/<item_id>/<amount>")
 def remove_stock(item_id: str, amount: int):
     item_entry: StockValue = get_item_from_db(item_id)
     # update stock, serialize and update database
@@ -106,12 +127,16 @@ def remove_stock(item_id: str, amount: int):
         db.set(item_id, msgpack.encode(item_entry))
     except redis.exceptions.RedisError:
         return abort(400, DB_ERROR_STR)
-    return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
+
+    publish(
+        STOCK_UPDATED, {"item_id": item_id, "stock": item_entry.stock, "amount": amount}
+    )
+    # return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
 else:
-    gunicorn_logger = logging.getLogger('gunicorn.error')
+    gunicorn_logger = logging.getLogger("gunicorn.error")
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
