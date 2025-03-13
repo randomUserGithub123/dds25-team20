@@ -51,3 +51,29 @@ but you can find any database you want in https://artifacthub.io/ and adapt the 
 Similarly to the `minikube` deployment but run the `deploy-charts-cluster.sh` in the helm step to also install an ingress to the cluster. 
 
 ***Requirements:*** You need to have access to kubectl of a k8s cluster.
+
+### RUNNING minikube
+1. `minikube start --cpus=4 --memory=8192`
+2. `minikube addons enable ingress`
+3. Build local Docker images:
+   1. `eval $(minikube docker-env)`
+   2. For each service: 
+      1. `docker build -t order:latest ./order`
+      2. `docker build -t stock:latest ./stock`
+      3. `docker build -t user:latest ./payment`
+4. Deploy Redis with the helm script
+5. Apply deployments of service configs: `kubectl apply -f k8s/`
+6. If `GATEWAY_URL` needed: `minikube ip`
+
+#### DELETING
+1. `kubectl delete -f k8s/`
+2. For each service: 
+   1. `helm delete order-redis`
+   2. `helm delete stock-redis`
+   3. `helm delete payment-redis`
+3. For each service: 
+   1. `kubectl delete pvc --selector app.kubernetes.io/instance=order-redis`
+   2. `kubectl delete pvc --selector app.kubernetes.io/instance=stock-redis`
+   3. `kubectl delete pvc --selector app.kubernetes.io/instance=payment-redis`
+4. `minikube stop`
+5. `minikube delete --all`

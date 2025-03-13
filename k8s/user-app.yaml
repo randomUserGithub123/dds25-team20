@@ -28,6 +28,7 @@ spec:
       containers:
         - name: user
           image: user:latest
+          imagePullPolicy: IfNotPresent
           resources:
             limits:
               memory: "1Gi"
@@ -41,7 +42,7 @@ spec:
             - containerPort: 5000
           env:
             - name: REDIS_HOST
-              value: redis-master
+              value: payment-redis-master
             - name: REDIS_PORT
               value: '6379'
             - name: REDIS_PASSWORD

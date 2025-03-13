@@ -1,0 +1,24 @@
+auth:
+  password: redis
+
+# sentinel:
+#   enabled: true
+#   quorum: 2
+#   masterSet: payment-redis
+
+master:
+  persistence:
+    size: "200Mi"
+  resources:
+    requests:
+      memory: "200Mi"
+      cpu: "200m"
+      
+replica:
+  replicaCount: 1
+  persistence:
+    size: "200Mi"
+  resources:
+    requests:
+      memory: "200Mi"
+      cpu: "200m"

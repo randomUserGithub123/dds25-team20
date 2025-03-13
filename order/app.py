@@ -19,10 +19,21 @@ GATEWAY_URL = os.environ['GATEWAY_URL']
 
 app = Flask("order-service")
 
-db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
-                              port=int(os.environ['REDIS_PORT']),
-                              password=os.environ['REDIS_PASSWORD'],
-                              db=int(os.environ['REDIS_DB']))
+sentinel_nodes = [
+    (os.environ['REDIS_SENTINEL_HOST'], int(os.environ['REDIS_SENTINEL_PORT'])),
+]
+
+sentinel = redis.Sentinel(
+    sentinel_nodes,
+    socket_timeout=0.1,
+    password=os.environ['REDIS_PASSWORD']
+)
+
+db = sentinel.master_for(
+    os.environ['REDIS_MASTER_SET'],
+    password=os.environ['REDIS_PASSWORD'],
+    db=int(os.environ['REDIS_DB'])
+)
 
 
 def close_db_connection():
