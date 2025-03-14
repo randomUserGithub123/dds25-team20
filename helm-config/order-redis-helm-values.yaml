@@ -1,24 +1,9 @@
-auth:
-  password: redis
+cluster:
+  nodes: 6
+  replicas: 1
 
-sentinel:
-  enabled: true
-  quorum: 2
-  masterSet: order-redis
+usePassword: true
+password: "redis"
 
-master:
-  persistence:
-    size: "200Mi"
-  resources:
-    requests:
-      memory: "200Mi"
-      cpu: "200m"
-      
-replica:
-  replicaCount: 3
-  persistence:
-    size: "200Mi"
-  resources:
-    requests:
-      memory: "200Mi"
-      cpu: "200m"
+persistence:
+  enabled: false

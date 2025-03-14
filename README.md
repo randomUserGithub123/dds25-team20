@@ -53,7 +53,7 @@ Similarly to the `minikube` deployment but run the `deploy-charts-cluster.sh` in
 ***Requirements:*** You need to have access to kubectl of a k8s cluster.
 
 ### RUNNING minikube
-1. `minikube start --cpus=4 --memory=8192`
+1. `minikube start --cpus=4 --memory=8192 --extra-config=kubelet.housekeeping-interval=10s`
 2. `minikube addons enable ingress`
 3. Build local Docker images:
    1. `eval $(minikube docker-env)`

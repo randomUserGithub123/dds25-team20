@@ -42,10 +42,8 @@ spec:
             - containerPort: 5000
           env:
             - name: REDIS_HOST
-              value: stock-redis-master
+              value: stock-redis-cluster
             - name: REDIS_PORT
               value: '6379'
             - name: REDIS_PASSWORD
               value: "redis"
-            - name: REDIS_DB
-              value: "0"
