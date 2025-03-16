@@ -142,40 +142,79 @@ def add_item(order_id: str, item_id: str, quantity: int):
 
 
 def rollback_stock(removed_items: list[tuple[str, int]]):
+    app.logger.debug("Rolling back stock")
     for item_id, quantity in removed_items:
         send_post_request(f"{GATEWAY_URL}/stock/add/{item_id}/{quantity}")
 
+def rollback_payment(user_id: str, amount: int):
+    app.logger.debug("Rolling back payment")
+    send_post_request(f"{GATEWAY_URL}/payment/refund/{user_id}/{amount}")
 
 @app.post('/checkout/<order_id>')
 def checkout(order_id: str):
     app.logger.debug(f"Checking out {order_id}")
     order_entry: OrderValue = get_order_from_db(order_id)
+
+    saga_state: dict[str, bool] = {
+        "stock_reserved": False,
+        "payment_processed": False,
+        "order_confirmed": False,
+    }
+
     # get the quantity per item
     items_quantities: dict[str, int] = defaultdict(int)
     for item_id, quantity in order_entry.items:
         items_quantities[item_id] += quantity
-    # The removed items will contain the items that we already have successfully subtracted stock from
-    # for rollback purposes.
     removed_items: list[tuple[str, int]] = []
-    for item_id, quantity in items_quantities.items():
-        stock_reply = send_post_request(f"{GATEWAY_URL}/stock/subtract/{item_id}/{quantity}")
-        if stock_reply.status_code != 200:
-            # If one item does not have enough stock we need to rollback
-            rollback_stock(removed_items)
-            abort(400, f'Out of stock on item_id: {item_id}')
-        removed_items.append((item_id, quantity))
-    user_reply = send_post_request(f"{GATEWAY_URL}/payment/pay/{order_entry.user_id}/{order_entry.total_cost}")
-    if user_reply.status_code != 200:
-        # If the user does not have enough credit we need to rollback all the item stock subtractions
-        rollback_stock(removed_items)
-        abort(400, "User out of credit")
-    order_entry.paid = True
+
     try:
+        # The removed items will contain the items that we already have successfully subtracted stock from
+        # for rollback purposes.
+        # RESERVE STOCK
+        app.logger.info(f"Reserving stock for {order_id}")
+        for item_id, quantity in items_quantities.items():
+            stock_reply = send_post_request(f"{GATEWAY_URL}/stock/subtract/{item_id}/{quantity}")
+            if stock_reply.status_code != 200:
+                app.logger.debug(f"Out of stock on item_id: {item_id}")
+                raise Exception(f"Out of stock on item_id: {item_id}")
+                # If one item does not have enough stock we need to rollback
+                #rollback_stock(removed_items)
+                #abort(400, f'Out of stock on item_id: {item_id}')
+            removed_items.append((item_id, quantity))
+        saga_state["stock_reserved"] = True
+        app.logger.info(f"Stock reserved for {order_id}")
+        
+        # PAYMENT
+        app.logger.info(f"Processing payment for {order_id}")
+        user_reply = send_post_request(f"{GATEWAY_URL}/payment/pay/{order_entry.user_id}/{order_entry.total_cost}")
+        if user_reply.status_code != 200:
+            app.logger.debug("User out of credit")
+            raise Exception("User out of credit")
+            # If the user does not have enough credit we need to rollback all the item stock subtractions
+            #rollback_stock(removed_items)
+            #abort(400, "User out of credit")
+        saga_state["payment_processed"] = True
+        app.logger.info(f"Payment processed for {order_id}")
+
+        # CONFIRM ORDER
+        app.logger.info(f"Confirming order for {order_id}")
+        order_entry.paid = True
         db.set(order_id, msgpack.encode(order_entry))
-    except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
-    app.logger.debug("Checkout successful")
-    return Response("Checkout successful", status=200)
+        saga_state["order_confirmed"] = True
+        app.logger.info("Checkout successful")
+        return Response("Checkout successful", status=200)
+    #try:
+    #    db.set(order_id, msgpack.encode(order_entry))
+    except Exception as e:
+        app.logger.debug(f"Checkout failed for {order_id}, {str(e)}")
+
+        if saga_state["stock_reserved"]:
+            rollback_stock(removed_items)
+
+        if saga_state["payment_processed"]:
+            rollback_payment(order_entry.user_id, order_entry.total_cost)
+        
+        return abort(400, str(e))
 
 
 if __name__ == '__main__':
