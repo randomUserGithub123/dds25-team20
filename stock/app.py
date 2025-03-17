@@ -1,15 +1,24 @@
 import logging
 import os
 import atexit
+import random
 import uuid
+import requests
+from collections import defaultdict
+from threading import Thread
 
-import redis
+from kafka import KafkaProducer, KafkaConsumer
 
 from msgspec import msgpack, Struct
 from flask import Flask, jsonify, abort, Response
 
+import redis
 
 DB_ERROR_STR = "DB error"
+REQ_ERROR_STR = "Requests error"
+
+STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
+STOCK_UPDATED = "StockUpdated"
 
 app = Flask("stock-service")
 
@@ -18,13 +27,43 @@ db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
 
+def publish(event: str, data: dict):
+    producer.send(event, data)
+    producer.flush()
+
+def close_producer():
+    producer.close()
+
+atexit.register(close_producer)
+
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
 def close_db_connection():
     db.close()
 
+producer = KafkaProducer(
+    bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+    value_serializer=lambda m: msgpack.encode(m)
+)
 
-atexit.register(close_db_connection)
-
+def event_listener():
+    consumer = KafkaConsumer(
+        STOCK_UPDATE_REQUESTED,
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        auto_offset_reset='earliest',
+        enable_auto_commit=True,
+        value_deserializer=lambda m: msgpack.decode(m)
+    )
+    for message in consumer:
+        topic = message.topic
+        data = message.value
+        if topic == STOCK_UPDATE_REQUESTED:
+            handle_stock_update_request(data)
+        
+def handle_stock_update_request(data: dict):
+    app.logger.info(f"Stock update requested for item: with amount: {data}")
+    print(f"Stock update requested for item: with amount: {data}")
+    publish(STOCK_UPDATED, data)
 
 class StockValue(Struct):
     stock: int
@@ -115,3 +154,4 @@ else:
     gunicorn_logger = logging.getLogger('gunicorn.error')
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
+    Thread(target=event_listener, daemon=True).start()
