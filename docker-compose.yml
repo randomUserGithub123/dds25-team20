@@ -27,6 +27,11 @@ services:
       - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=CLIENT
     depends_on:
       - zookeeper
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   gateway:
     image: nginx:1.25-bookworm
@@ -51,6 +56,12 @@ services:
     depends_on:
       - order-db
       - kafka
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
 
   order-db:
     image: redis:7.2-bookworm
@@ -65,8 +76,15 @@ services:
     env_file:
       - env/stock_redis.env
     depends_on:
+      - order-service
       - stock-db
       - kafka
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
 
   stock-db:
     image: redis:7.2-bookworm
@@ -81,8 +99,15 @@ services:
     env_file:
       - env/payment_redis.env
     depends_on:
+      - order-service
       - payment-db
       - kafka
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
 
   payment-db:
     image: redis:7.2-bookworm

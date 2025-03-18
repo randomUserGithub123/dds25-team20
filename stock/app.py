@@ -1,24 +1,26 @@
 import logging
 import os
 import atexit
-import random
 import uuid
-import requests
 from collections import defaultdict
 from threading import Thread
 
 from kafka import KafkaProducer, KafkaConsumer
+import redis
 
 from msgspec import msgpack, Struct
 from flask import Flask, jsonify, abort, Response
 
-import redis
+STOCK_RESERVATION_REQUESTED = "StockReservationRequested"
+STOCK_RESERVATION_FAILED = "StockReservationFailed"
+STOCK_RESERVATION_SUCCEEDED = "StockReservationSucceeded"
+
+STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
+STOCK_UPDATED = "StockUpdateSucceeded"
+STOCK_UPDATE_FAILED = "StockUpdateFailed"
 
 DB_ERROR_STR = "DB error"
 REQ_ERROR_STR = "Requests error"
-
-STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
-STOCK_UPDATED = "StockUpdated"
 
 app = Flask("stock-service")
 
@@ -27,43 +29,106 @@ db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
 
-def publish(event: str, data: dict):
-    producer.send(event, data)
+def close_db_connection() -> None:
+    db.close()
+
+def publish(event: str, data: dict, key: str) -> None:
+    producer.send(event, data, key=key)
     producer.flush()
 
-def close_producer():
+def close_producer() -> None:
     producer.close()
 
+def close_consumer() -> None:
+    consumer.close()
+
+atexit.register(close_db_connection)
 atexit.register(close_producer)
+atexit.register(close_consumer)
 
 KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
-def close_db_connection():
-    db.close()
-
 producer = KafkaProducer(
     bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-    value_serializer=lambda m: msgpack.encode(m)
+    value_serializer=lambda m: msgpack.encode(m),
+    key_serializer=lambda m: str(m).encode('utf-8')
 )
 
-def event_listener():
-    consumer = KafkaConsumer(
+consumer = KafkaConsumer(
         STOCK_UPDATE_REQUESTED,
+        STOCK_RESERVATION_REQUESTED,
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         auto_offset_reset='earliest',
         enable_auto_commit=True,
-        value_deserializer=lambda m: msgpack.decode(m)
+        value_deserializer=lambda m: msgpack.decode(m),
+        key_deserializer=lambda k: k.decode('utf-8') if k else None
     )
+
+def event_listener() -> None:
     for message in consumer:
-        topic = message.topic
-        data = message.value
-        if topic == STOCK_UPDATE_REQUESTED:
+        topic: str = message.topic
+        data: dict = message.value
+        if topic == STOCK_RESERVATION_REQUESTED:
+            handle_stock_reservation_request(data)
+        elif topic == STOCK_UPDATE_REQUESTED:
             handle_stock_update_request(data)
+
+def handle_stock_reservation_request(data: dict) -> None:
+    app.logger.info("Stock reservation requested for %s", data.get("order_id"))
+    order_id: str = data.get("order_id")
+    order_entry: dict = data.get("order_entry")
+    reserved_items: dict[str, int] = {}
+    reservation_success: bool = True
+    failure_reason: str = "Unknown error"
+    
+    item_quantities = defaultdict(int)
+    for item_id, quantity in order_entry["items"]:
+        item_quantities[item_id] += quantity
+    
+    # First check if all items have sufficient stock
+    for item_id, quantity in item_quantities.items():
+        try:
+            item_entry = get_item_from_db(item_id)
+            if item_entry.stock < quantity:
+                reservation_success = False
+                failure_reason = f"Insufficient stock for item {item_id}: requested {quantity}, available {item_entry.stock}"
+                app.logger.error(failure_reason)
+                break
+            reserved_items[item_id] = quantity
+        except Exception as e:
+            reservation_success = False
+            failure_reason = f"Error checking item {item_id}: {str(e)}"
+            app.logger.error(failure_reason)
+            break
+    
+    if reservation_success:
+        # If all checks passed, actually reserve the stock
+        try:
+            for item_id, quantity in reserved_items.items():
+                item_entry = get_item_from_db(item_id)
+                item_entry.stock -= quantity
+                db.set(item_id, msgpack.encode(item_entry))
+                app.logger.debug(f"Reserved {quantity} units of item {item_id}, remaining stock: {item_entry.stock}")
+            
+            # Send success event
+            app.logger.info(f"Stock reservation succeeded for order {order_id}")
+            publish(STOCK_RESERVATION_SUCCEEDED, {"order_data": data, "reserved_items": reserved_items}, order_id)
         
-def handle_stock_update_request(data: dict):
-    app.logger.info(f"Stock update requested for item: with amount: {data}")
-    print(f"Stock update requested for item: with amount: {data}")
-    publish(STOCK_UPDATED, data)
+        except Exception as e:
+            failure_reason = f"Error during stock reservation: {str(e)}"
+            app.logger.error(failure_reason)
+            publish(STOCK_RESERVATION_FAILED, {"order_data": data, "reason": failure_reason}, order_id)
+    else:
+        # Send failure event with reason
+        publish(STOCK_RESERVATION_FAILED, {"order_data": data, "reason": failure_reason}, order_id)
+
+
+def handle_stock_update_request(data: dict) -> None:
+    app.logger.info(f"Stock update requested: {data}")
+    order_id = data.get("order_id")
+    #TODO
+    publish(STOCK_UPDATED, data, order_id)
+
 
 class StockValue(Struct):
     stock: int
@@ -149,6 +214,7 @@ def remove_stock(item_id: str, amount: int):
 
 
 if __name__ == '__main__':
+    Thread(target=event_listener, daemon=True).start()
     app.run(host="0.0.0.0", port=8000, debug=True)
 else:
     gunicorn_logger = logging.getLogger('gunicorn.error')
