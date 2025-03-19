@@ -31,11 +31,18 @@ app = Quart("order-service")
 GATEWAY_URL = os.environ["GATEWAY_URL"]
 KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
 
-db = redis.asyncio.Redis(
+# db = redis.asyncio.Redis(
+#     host=os.environ["REDIS_HOST"],
+#     port=int(os.environ["REDIS_PORT"]),
+#     password=os.environ["REDIS_PASSWORD"],
+#     db=int(os.environ["REDIS_DB"])
+# )
+
+db = redis.asyncio.cluster.RedisCluster(
     host=os.environ["REDIS_HOST"],
     port=int(os.environ["REDIS_PORT"]),
     password=os.environ["REDIS_PASSWORD"],
-    db=int(os.environ["REDIS_DB"])
+    decode_responses=False
 )
 
 def close_db_connection() -> None:
