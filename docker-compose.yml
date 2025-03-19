@@ -1,6 +1,5 @@
 version: "3"
 services:
-
   zookeeper:
     restart: always
     image: docker.io/bitnami/zookeeper:3.8
@@ -10,6 +9,7 @@ services:
       - "zookeeper-volume:/bitnami"
     environment:
       - ALLOW_ANONYMOUS_LOGIN=yes
+
   kafka:
     restart: always
     image: docker.io/bitnami/kafka:3.3
@@ -50,12 +50,16 @@ services:
     environment:
       - GATEWAY_URL=http://gateway:80
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+    command: >
+      sh -c "python kafka_stock_consumer.py & python kafka_payment_consumer.py &
+      gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app"
     env_file:
       - env/order_redis.env
     depends_on:
-      - order-db
-      - kafka
+      kafka:
+        condition: service_healthy
+      order-db:
+        condition: service_started
     deploy:
       restart_policy:
         condition: on-failure
@@ -72,13 +76,16 @@ services:
     image: stock:latest
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+    command: >
+      sh -c "python kafka_consumer.py &
+      gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app"
     env_file:
       - env/stock_redis.env
     depends_on:
-      - order-service
-      - stock-db
-      - kafka
+      kafka:
+        condition: service_healthy
+      stock-db:
+        condition: service_started
     deploy:
       restart_policy:
         condition: on-failure
@@ -95,13 +102,16 @@ services:
     image: user:latest
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+    command: >
+      sh -c "python kafka_consumer.py &
+      gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app"
     env_file:
       - env/payment_redis.env
     depends_on:
-      - order-service
-      - payment-db
-      - kafka
+      kafka:
+        condition: service_healthy
+      payment-db:
+        condition: service_started
     deploy:
       restart_policy:
         condition: on-failure

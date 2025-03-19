@@ -5,16 +5,11 @@ import time
 import requests
 from collections import defaultdict
 
-from kafka import KafkaProducer, KafkaConsumer
+from kafka import KafkaProducer
 import redis
 
 from msgspec import msgpack, Struct
 from flask import Flask, jsonify, abort, Response
-
-
-STOCK_RESERVATION_REQUESTED = "StockReservationRequested"
-STOCK_RESERVATION_FAILED = "StockReservationFailed"
-STOCK_RESERVATION_SUCCEEDED = "StockReservationSucceeded"
 
 STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
 STOCK_UPDATED = "StockUpdateSucceeded"
@@ -32,7 +27,9 @@ GATEWAY_URL = os.environ["GATEWAY_URL"]
 
 app = Flask("order-service")
 
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
+    "KAFKA_BOOTSTRAP_SERVERS"
+)
 
 db: redis.Redis = redis.Redis(
     host=os.environ["REDIS_HOST"],
@@ -50,21 +47,6 @@ producer = KafkaProducer(
     key_serializer=lambda m: str(m).encode('utf-8')
 )
 
-consumer = KafkaConsumer(
-        STOCK_RESERVATION_FAILED,
-        STOCK_RESERVATION_SUCCEEDED,
-        STOCK_UPDATED,
-        STOCK_UPDATE_FAILED,
-        PAYMENT_COMPLETED,
-        PAYMENT_FAILED,
-        ORDER_COMPLETED,
-        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-        auto_offset_reset='earliest',
-        enable_auto_commit=True,
-        value_deserializer=lambda m: msgpack.decode(m),
-        key_deserializer=lambda m: m.decode('utf-8') if m else None
-    )
-
 def publish(event: str, data: dict) -> None:
     producer.send(event, data)
     producer.flush()
@@ -72,12 +54,8 @@ def publish(event: str, data: dict) -> None:
 def close_producer() -> None:
     producer.close()
 
-def close_consumer() -> None:
-    consumer.close()
-
 atexit.register(close_producer)
 atexit.register(close_db_connection)
-atexit.register(close_consumer)
 
 def consume_event(order_id: str, success_topic: str, failure_topic: str, timeout: int = 22) -> bool | None:
     # TODO implement fallback after timeout
@@ -142,65 +120,79 @@ def add_item(order_id: str, item_id: str, quantity: int):
 
 @app.post("/checkout/<order_id>")
 def checkout(order_id: str):
-    app.logger.debug(f"Checking out {order_id}")
+
+    app.logger.debug(
+        f"Checking out {order_id}"
+    )
     order_entry: OrderValue = get_order_from_db(order_id)
     order_data: dict = {
         "order_id": order_id,
         "order_entry": order_entry
     }
-    app.logger.info("[ORDER]: Initiating checkout for order: %s", order_id)
+    app.logger.info(
+        "[ORDER]: Initiating checkout for order: %s", order_id
+    )
 
-    # get the quantity per item
     items_quantities: dict[str, int] = defaultdict(int)
     for item_id, quantity in order_entry.items:
         items_quantities[item_id] += quantity
     
-    # publish stock reservation request
-    publish(STOCK_RESERVATION_REQUESTED, order_data)
-    app.logger.info("Stock reservation requested for %s", order_id)
+    publish(
+        "STOCK",
+        {
+            "order_id": order_id,
+            "items_quantities": items_quantities,
+            "user_id": order_entry.user_id,
+            "total_cost": order_entry.total_cost,
+            "event_type": STOCK_UPDATE_REQUESTED
+        }
+    )
+    app.logger.info(
+        "[ORDER]: Published 'STOCK' topic for order: %s", order_id
+    )
 
-    stock_reservation_status: bool | None = consume_event(order_id, STOCK_RESERVATION_SUCCEEDED, STOCK_RESERVATION_FAILED)
-    app.logger.info("Stock reservation status: %s", stock_reservation_status)
+    # stock_reservation_status: bool | None = consume_event(order_id, STOCK_RESERVATION_SUCCEEDED, STOCK_RESERVATION_FAILED)
+    # app.logger.info("Stock reservation status: %s", stock_reservation_status)
 
-    if stock_reservation_status is None:
-        app.logger.error("Stock reservation timed out for %s", order_id)
-        abort(500, "Stock reservation timed out")
-    elif not stock_reservation_status:
-        app.logger.error("Stock reservation failed for %s", order_id)
-        handle_stock_reservation_failed(order_data)
-        abort(400, "Stock reservation failed")
-    elif stock_reservation_status:
-        # If it succeeded, initiate payment
-        app.logger.info("Stock reservation succeeded for %s, initiating payment", order_id)
-        publish(PAYMENT_REQUESTED, order_data)
+    # if stock_reservation_status is None:
+    #     app.logger.error("Stock reservation timed out for %s", order_id)
+    #     abort(500, "Stock reservation timed out")
+    # elif not stock_reservation_status:
+    #     app.logger.error("Stock reservation failed for %s", order_id)
+    #     handle_stock_reservation_failed(order_data)
+    #     abort(400, "Stock reservation failed")
+    # elif stock_reservation_status:
+    #     # If it succeeded, initiate payment
+    #     app.logger.info("Stock reservation succeeded for %s, initiating payment", order_id)
+    #     publish(PAYMENT_REQUESTED, order_data)
 
-    payment_status: bool | None = consume_event(order_id, PAYMENT_COMPLETED, PAYMENT_FAILED)
+    # payment_status: bool | None = consume_event(order_id, PAYMENT_COMPLETED, PAYMENT_FAILED)
 
-    if payment_status is None:
-        app.logger.error("Payment timed out for %s", order_id)
-        abort(500, "Payment timed out")
-    elif not payment_status:
-        app.logger.error("Payment failed for %s", order_id)
-        handle_payment_failed(order_data)
-        abort(400, "Payment failed")
-    elif payment_status:
-        # If payment succeeded, publish stock update request
-        app.logger.info("Payment succeeded for %s, initiating stock update", order_id)
-        publish(STOCK_UPDATE_REQUESTED, order_data)
+    # if payment_status is None:
+    #     app.logger.error("Payment timed out for %s", order_id)
+    #     abort(500, "Payment timed out")
+    # elif not payment_status:
+    #     app.logger.error("Payment failed for %s", order_id)
+    #     handle_payment_failed(order_data)
+    #     abort(400, "Payment failed")
+    # elif payment_status:
+    #     # If payment succeeded, publish stock update request
+    #     app.logger.info("Payment succeeded for %s, initiating stock update", order_id)
+    #     publish(STOCK_UPDATE_REQUESTED, order_data)
 
-    stock_update_status: bool | None = consume_event(order_id, STOCK_UPDATED, STOCK_UPDATE_FAILED)
+    # stock_update_status: bool | None = consume_event(order_id, STOCK_UPDATED, STOCK_UPDATE_FAILED)
 
-    if stock_update_status is None:
-        app.logger.error("Stock update timed out for %s", order_id)
-        abort(500, "Stock update timed out")
-    elif not stock_update_status:
-        app.logger.error("Stock update failed for %s", order_id)
-        handle_stock_update_failed(order_id)
-        abort(400, "Stock update failed")
-    elif stock_update_status:
-        app.logger.info("Stock update succeeded for %s", order_id)
-        publish(ORDER_COMPLETED, order_data)
-        return Response(f"Order: {order_id} completed", status=200)
+    # if stock_update_status is None:
+    #     app.logger.error("Stock update timed out for %s", order_id)
+    #     abort(500, "Stock update timed out")
+    # elif not stock_update_status:
+    #     app.logger.error("Stock update failed for %s", order_id)
+    #     handle_stock_update_failed(order_id)
+    #     abort(400, "Stock update failed")
+    # elif stock_update_status:
+    #     app.logger.info("Stock update succeeded for %s", order_id)
+    #     publish(ORDER_COMPLETED, order_data)
+    return Response(f"Order: {order_id} completed", status=200)
 
     
 
@@ -222,8 +214,6 @@ def handle_stock_updated(data: dict):
 def handle_payment_completed(data: dict):
     app.logger.info("Received PAYMENT_COMPLETED event: %s", data)
 
-
-    
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

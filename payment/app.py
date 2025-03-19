@@ -17,7 +17,9 @@ DB_ERROR_STR = "DB error"
 
 app = Flask("payment-service")
 
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
+    "KAFKA_BOOTSTRAP_SERVERS"
+)
 
 producer = KafkaProducer(
     bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
@@ -190,10 +192,10 @@ def remove_credit(user_id: str, amount: int):
 
 
 if __name__ == '__main__':
-    Thread(target=event_listener, daemon=True).start()
+    # Thread(target=event_listener, daemon=True).start()
     app.run(host="0.0.0.0", port=8000, debug=True)
 else:
     gunicorn_logger = logging.getLogger('gunicorn.error')
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
-    Thread(target=event_listener, daemon=True).start()
+    # Thread(target=event_listener, daemon=True).start()

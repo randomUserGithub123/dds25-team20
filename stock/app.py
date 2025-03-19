@@ -9,7 +9,7 @@ from kafka import KafkaProducer, KafkaConsumer
 import redis
 
 from msgspec import msgpack, Struct
-from flask import Flask, jsonify, abort, Response
+from flask import Flask, jsonify, abort, Response, request
 
 STOCK_RESERVATION_REQUESTED = "StockReservationRequested"
 STOCK_RESERVATION_FAILED = "StockReservationFailed"
@@ -46,7 +46,9 @@ atexit.register(close_db_connection)
 atexit.register(close_producer)
 atexit.register(close_consumer)
 
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
+    "KAFKA_BOOTSTRAP_SERVERS"
+)
 
 producer = KafkaProducer(
     bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
@@ -212,12 +214,11 @@ def remove_stock(item_id: str, amount: int):
         return abort(400, DB_ERROR_STR)
     return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
 
-
 if __name__ == '__main__':
-    Thread(target=event_listener, daemon=True).start()
+    # Thread(target=event_listener, daemon=True).start()
     app.run(host="0.0.0.0", port=8000, debug=True)
 else:
     gunicorn_logger = logging.getLogger('gunicorn.error')
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
-    Thread(target=event_listener, daemon=True).start()
+    # Thread(target=event_listener, daemon=True).start()
