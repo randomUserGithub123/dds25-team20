@@ -1,15 +1,14 @@
-import os
+import os, sys
 import atexit
 import uuid
-import time
-import requests
+import asyncio
 from collections import defaultdict
 
-from kafka import KafkaProducer
+from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
+from quart import Quart, jsonify, abort, Response, request
 import redis
-
 from msgspec import msgpack, Struct
-from flask import Flask, jsonify, abort, Response
+import aiohttp
 
 STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
 STOCK_UPDATED = "StockUpdateSucceeded"
@@ -23,55 +22,26 @@ ORDER_COMPLETED = "OrderCompleted"
 
 DB_ERROR_STR = "DB error"
 REQ_ERROR_STR = "Requests error"
+
+order_events = {}
+order_status = {}
+
+app = Quart("order-service")
+
 GATEWAY_URL = os.environ["GATEWAY_URL"]
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
 
-app = Flask("order-service")
-
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
-    "KAFKA_BOOTSTRAP_SERVERS"
-)
-
-db: redis.Redis = redis.Redis(
+db = redis.asyncio.Redis(
     host=os.environ["REDIS_HOST"],
     port=int(os.environ["REDIS_PORT"]),
     password=os.environ["REDIS_PASSWORD"],
-    db=int(os.environ["REDIS_DB"]),
+    db=int(os.environ["REDIS_DB"])
 )
 
 def close_db_connection() -> None:
-    db.close()
+    asyncio.create_task(db.close())
 
-producer = KafkaProducer(
-    bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-    value_serializer=lambda m: msgpack.encode(m),
-    key_serializer=lambda m: str(m).encode('utf-8')
-)
-
-def publish(event: str, data: dict) -> None:
-    producer.send(event, data)
-    producer.flush()
-
-def close_producer() -> None:
-    producer.close()
-
-atexit.register(close_producer)
 atexit.register(close_db_connection)
-
-def consume_event(order_id: str, success_topic: str, failure_topic: str, timeout: int = 22) -> bool | None:
-    # TODO implement fallback after timeout
-    start_time = time.time()
-    app.logger.info("Consuming events for order: %s", order_id)
-    while time.time() - start_time < timeout:
-        messages = consumer.poll(timeout_ms=1)
-        for topic_partition, message_list in messages.items():
-            for message in message_list:
-                if message.key == order_id:
-                    if message.topic == success_topic:
-                        return True
-                    if message.topic == failure_topic:
-                        return False
-            time.sleep(0.1)
-    return None
 
 class OrderValue(Struct):
     paid: bool
@@ -79,38 +49,85 @@ class OrderValue(Struct):
     user_id: str
     total_cost: int
 
-def get_order_from_db(order_id: str) -> OrderValue | None:
+async def get_order_from_db(order_id: str) -> OrderValue | None:
     try:
-        entry: bytes = db.get(order_id)
+        entry: bytes = await db.get(order_id)
+        return msgpack.decode(entry, type=OrderValue) if entry else None
     except redis.exceptions.RedisError:
         abort(400, DB_ERROR_STR)
-    entry: OrderValue | None = msgpack.decode(entry, type=OrderValue) if entry else None
-    if entry is None:
-        abort(400, f"Order: {order_id} not found!")
-    return entry
+
+producer = None
+
+async def create_kafka_producer():
+    global producer
+    producer = AIOKafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        value_serializer=lambda m: msgpack.encode(m)
+    )
+    await producer.start()
+
+async def close_kafka_producer():
+    global producer
+    if producer:
+        await producer.stop()
+
+async def consume_order_status_updates():
+    consumer = AIOKafkaConsumer(
+        "ORDER_STATUS_UPDATE",
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        value_deserializer=lambda m: msgpack.decode(m)
+    )
+    await consumer.start()
+    try:
+        async for message in consumer:
+
+            order_id = message.value["order_id"]
+            status = message.value["status"]
+
+            if(
+                order_id in order_events
+            ):
+                order_status[order_id] = status.upper()
+                order_events[order_id].set()
+    finally:
+        await consumer.stop()
+
+@app.before_serving
+async def startup():
+    await create_kafka_producer()
+    asyncio.create_task(consume_order_status_updates())
+
+@app.after_serving
+async def shutdown():
+    await close_kafka_producer()
 
 @app.post("/create/<user_id>")
-def create_order(user_id: str):
+async def create_order(user_id: str):
     key = str(uuid.uuid4())
     value = msgpack.encode(OrderValue(paid=False, items=[], user_id=user_id, total_cost=0))
     try:
-        db.set(key, value)
+        await db.set(key, value)
     except redis.exceptions.RedisError:
-        abort(400, DB_ERROR_STR)
+        return abort(400, DB_ERROR_STR)
     return jsonify({"order_id": key})
 
 @app.post("/addItem/<order_id>/<item_id>/<quantity>")
-def add_item(order_id: str, item_id: str, quantity: int):
-    order_entry: OrderValue = get_order_from_db(order_id)
-    # Validate item and get price from stock service via gateway
-    item_reply = requests.get(f"{GATEWAY_URL}/stock/find/{item_id}")
-    if item_reply.status_code != 200:
-        abort(400, f"Item: {item_id} does not exist!")
-    item_json: dict = item_reply.json()
+async def add_item(order_id: str, item_id: str, quantity: int):
+    order_entry = await get_order_from_db(order_id)
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(f"{GATEWAY_URL}/stock/find/{item_id}") as resp:
+                if resp.status != 200:
+                    abort(400, f"Item: {item_id} does not exist!")
+                item_json = await resp.json()
+        except Exception as e:
+            abort(400, REQ_ERROR_STR)
+
     order_entry.items.append((item_id, int(quantity)))
     order_entry.total_cost += int(quantity) * item_json["price"]
     try:
-        db.set(order_id, msgpack.encode(order_entry))
+        await db.set(order_id, msgpack.encode(order_entry))
     except redis.exceptions.RedisError:
         abort(400, DB_ERROR_STR)
     return Response(
@@ -119,25 +136,20 @@ def add_item(order_id: str, item_id: str, quantity: int):
     )
 
 @app.post("/checkout/<order_id>")
-def checkout(order_id: str):
+async def checkout(order_id: str):
 
-    app.logger.debug(
-        f"Checking out {order_id}"
-    )
-    order_entry: OrderValue = get_order_from_db(order_id)
-    order_data: dict = {
-        "order_id": order_id,
-        "order_entry": order_entry
-    }
-    app.logger.info(
-        "[ORDER]: Initiating checkout for order: %s", order_id
-    )
+    app.logger.debug(f"Checking out {order_id}")
+    order_entry = await get_order_from_db(order_id)
+    app.logger.info("[ORDER]: Initiating checkout for order: %s", order_id)
 
-    items_quantities: dict[str, int] = defaultdict(int)
+    items_quantities = defaultdict(int)
     for item_id, quantity in order_entry.items:
         items_quantities[item_id] += quantity
-    
-    publish(
+
+    order_status[order_id] = "PENDING"
+    order_events[order_id] = asyncio.Event()
+
+    await producer.send(
         "STOCK",
         {
             "order_id": order_id,
@@ -147,78 +159,36 @@ def checkout(order_id: str):
             "event_type": STOCK_UPDATE_REQUESTED
         }
     )
-    app.logger.info(
-        "[ORDER]: Published 'STOCK' topic for order: %s", order_id
-    )
 
-    # stock_reservation_status: bool | None = consume_event(order_id, STOCK_RESERVATION_SUCCEEDED, STOCK_RESERVATION_FAILED)
-    # app.logger.info("Stock reservation status: %s", stock_reservation_status)
+    app.logger.info("[ORDER]: Published 'STOCK' topic for order: %s", order_id)
 
-    # if stock_reservation_status is None:
-    #     app.logger.error("Stock reservation timed out for %s", order_id)
-    #     abort(500, "Stock reservation timed out")
-    # elif not stock_reservation_status:
-    #     app.logger.error("Stock reservation failed for %s", order_id)
-    #     handle_stock_reservation_failed(order_data)
-    #     abort(400, "Stock reservation failed")
-    # elif stock_reservation_status:
-    #     # If it succeeded, initiate payment
-    #     app.logger.info("Stock reservation succeeded for %s, initiating payment", order_id)
-    #     publish(PAYMENT_REQUESTED, order_data)
+    await order_events[order_id].wait()
 
-    # payment_status: bool | None = consume_event(order_id, PAYMENT_COMPLETED, PAYMENT_FAILED)
+    if(
+        order_status[order_id] == "FAILED"
+    ):
+        del order_status[order_id]
+        del order_events[order_id]
+        abort(400, "User out of credit")
+    elif(
+        order_status[order_id] == "COMPLETED"
+    ):
+        order_entry.paid = True
+        try:
+            await db.set(order_id, msgpack.encode(order_entry))
+        except redis.exceptions.RedisError:
+            del order_status[order_id]
+            del order_events[order_id]
+            return abort(400, DB_ERROR_STR)
+        app.logger.debug("Checkout successful")
 
-    # if payment_status is None:
-    #     app.logger.error("Payment timed out for %s", order_id)
-    #     abort(500, "Payment timed out")
-    # elif not payment_status:
-    #     app.logger.error("Payment failed for %s", order_id)
-    #     handle_payment_failed(order_data)
-    #     abort(400, "Payment failed")
-    # elif payment_status:
-    #     # If payment succeeded, publish stock update request
-    #     app.logger.info("Payment succeeded for %s, initiating stock update", order_id)
-    #     publish(STOCK_UPDATE_REQUESTED, order_data)
+        del order_status[order_id]
+        del order_events[order_id]
 
-    # stock_update_status: bool | None = consume_event(order_id, STOCK_UPDATED, STOCK_UPDATE_FAILED)
-
-    # if stock_update_status is None:
-    #     app.logger.error("Stock update timed out for %s", order_id)
-    #     abort(500, "Stock update timed out")
-    # elif not stock_update_status:
-    #     app.logger.error("Stock update failed for %s", order_id)
-    #     handle_stock_update_failed(order_id)
-    #     abort(400, "Stock update failed")
-    # elif stock_update_status:
-    #     app.logger.info("Stock update succeeded for %s", order_id)
-    #     publish(ORDER_COMPLETED, order_data)
-    return Response(f"Order: {order_id} completed", status=200)
-
-    
-
-def handle_stock_reservation_failed(order_id: str):
-    #TODO
-    pass
-
-def handle_payment_failed(order_id: str):
-    #TODO
-    pass
-
-def handle_stock_update_failed(order_id: str):
-    #TODO
-    pass
-
-def handle_stock_updated(data: dict):
-    app.logger.info("Received STOCK_UPDATED event: %s", data)
-
-def handle_payment_completed(data: dict):
-    app.logger.info("Received PAYMENT_COMPLETED event: %s", data)
-
+        return Response(
+            f"Order: {order_id} completed", 
+            status=200
+        )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-else:
-    from logging import getLogger
-    gunicorn_logger = getLogger("gunicorn.error")
-    app.logger.handlers = gunicorn_logger.handlers
-    app.logger.setLevel(gunicorn_logger.level)

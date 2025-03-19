@@ -111,36 +111,36 @@ class TestMicroservices(unittest.TestCase):
         checkout_response = tu.checkout_order(order_id).status_code
         self.assertTrue(tu.status_code_is_failure(checkout_response))
 
-        # stock_after_subtract: int = tu.find_item(item_id1)['stock']
-        # self.assertEqual(stock_after_subtract, 15)
+        stock_after_subtract: int = tu.find_item(item_id1)['stock']
+        self.assertEqual(stock_after_subtract, 15)
 
-        # add_stock_response = tu.add_stock(item_id2, 15)
-        # self.assertTrue(tu.status_code_is_success(int(add_stock_response)))
+        add_stock_response = tu.add_stock(item_id2, 15)
+        self.assertTrue(tu.status_code_is_success(int(add_stock_response)))
 
-        # credit_after_payment: int = tu.find_user(user_id)['credit']
-        # self.assertEqual(credit_after_payment, 0)
+        credit_after_payment: int = tu.find_user(user_id)['credit']
+        self.assertEqual(credit_after_payment, 0)
 
-        # checkout_response = tu.checkout_order(order_id).status_code
-        # self.assertTrue(tu.status_code_is_failure(checkout_response))
+        checkout_response = tu.checkout_order(order_id).status_code
+        self.assertTrue(tu.status_code_is_failure(checkout_response))
 
-        # add_credit_response = tu.add_credit_to_user(user_id, 15)
-        # self.assertTrue(tu.status_code_is_success(int(add_credit_response)))
+        add_credit_response = tu.add_credit_to_user(user_id, 15)
+        self.assertTrue(tu.status_code_is_success(int(add_credit_response)))
 
-        # credit: int = tu.find_user(user_id)['credit']
-        # self.assertEqual(credit, 15)
+        credit: int = tu.find_user(user_id)['credit']
+        self.assertEqual(credit, 15)
 
-        # stock: int = tu.find_item(item_id1)['stock']
-        # self.assertEqual(stock, 15)
+        stock: int = tu.find_item(item_id1)['stock']
+        self.assertEqual(stock, 15)
 
-        # checkout_response = tu.checkout_order(order_id)
-        # print(checkout_response.text)
-        # self.assertTrue(tu.status_code_is_success(checkout_response.status_code))
+        checkout_response = tu.checkout_order(order_id)
+        print(checkout_response.text)
+        self.assertTrue(tu.status_code_is_success(checkout_response.status_code))
 
-        # stock_after_subtract: int = tu.find_item(item_id1)['stock']
-        # self.assertEqual(stock_after_subtract, 14)
+        stock_after_subtract: int = tu.find_item(item_id1)['stock']
+        self.assertEqual(stock_after_subtract, 14)
 
-        # credit: int = tu.find_user(user_id)['credit']
-        # self.assertEqual(credit, 5)
+        credit: int = tu.find_user(user_id)['credit']
+        self.assertEqual(credit, 5)
 
 
 if __name__ == '__main__':

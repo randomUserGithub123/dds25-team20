@@ -1,103 +1,66 @@
-import os, sys
-from time import sleep
+import os
+import sys
+import asyncio
 
-from threading import Thread
-
-import requests
-
-from kafka import KafkaProducer, KafkaConsumer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+import aiohttp
 from msgspec import msgpack
 
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
-    "KAFKA_BOOTSTRAP_SERVERS"
-)
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
 
-STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
 STOCK_UPDATED = "StockUpdateSucceeded"
 STOCK_UPDATE_FAILED = "StockUpdateFailed"
-
 PAYMENT_REQUESTED = "PaymentRequested"
-PAYMENT_COMPLETED = "PaymentCompleted"
-PAYMENT_FAILED = "PaymentFailed"
 
-ORDER_COMPLETED = "OrderCompleted"
+async def consume_infinitely_stock():
+    consumer = AIOKafkaConsumer(
+        "STOCK_PROCESSING",
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        auto_offset_reset="earliest",
+        enable_auto_commit=True,
+        value_deserializer=lambda m: msgpack.decode(m)
+    )
+    producer = AIOKafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        value_serializer=lambda m: msgpack.encode(m)
+    )
 
-stock_consumer = KafkaConsumer(
-    "STOCK_PROCESSING",
-    bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-    auto_offset_reset="earliest",
-    enable_auto_commit=True,
-    value_deserializer=lambda m: msgpack.decode(m),
-    key_deserializer=lambda m: m.decode("utf-8") if m else None
-)
+    await consumer.start()
+    await producer.start()
 
-stock_producer = KafkaProducer(
-    bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-    value_serializer=lambda m: msgpack.encode(m),
-    key_serializer=lambda m: str(m).encode('utf-8')
-)
+    try:
+        async for message in consumer:
+            event_type = message.value["event_type"]
+            if event_type == STOCK_UPDATED:
+                print(f"STOCK_UPDATED event of order: {message.value['order_id']}")
+                sys.stdout.flush()
 
-def consume_infinitely_stock():
+                await producer.send(
+                    "PAYMENT",
+                    {
+                        "order_id": message.value["order_id"],
+                        "items_quantities": message.value["items_quantities"],
+                        "user_id": message.value["user_id"],
+                        "total_cost": message.value["total_cost"],
+                        "event_type": PAYMENT_REQUESTED
+                    }
+                )
 
-    stock_consumer.subscribe([
-        "STOCK_PROCESSING"
-    ])
+            elif event_type == STOCK_UPDATE_FAILED:
+                print(f"STOCK_UPDATE_FAILED event of order: {message.value['order_id']}")
+                sys.stdout.flush()
 
-    while True:
-        try: 
+                await producer.send(
+                    "ORDER_STATUS_UPDATE",
+                    {
+                        "order_id": message.value['order_id'], 
+                        "status": 'FAILED'
+                    }
+                )
 
-            raw_messages = stock_consumer.poll(
-                timeout_ms=10
-            )
-
-            if not raw_messages:
-                continue
-
-            print(
-                raw_messages
-            )
-            sys.stdout.flush()
-
-            for topic_partition, messages in raw_messages.items():
-                if(
-                    topic_partition.topic == "STOCK_PROCESSING"
-                ):
-                    for record in messages:
-                        event_type = record.value["event_type"]
-                        if(
-                            event_type == STOCK_UPDATED
-                        ):
-                            print(
-                                f"STOCK_UPDATED event of order: {record.value["order_id"]}"
-                            )
-                            sys.stdout.flush()
-
-                            stock_producer.send(
-                                "PAYMENT",
-                                {
-                                    "order_id": record.value["order_id"],
-                                    "items_quantities": record.value["items_quantities"],
-                                    "user_id": record.value["user_id"],
-                                    "total_cost": record.value["total_cost"],
-                                    "event_type": PAYMENT_REQUESTED
-                                }
-                            )
-                            stock_producer.flush()
-                            
-                        elif(
-                            event_type == STOCK_UPDATE_FAILED
-                        ):
-                            print(
-                                f"STOCK_UPDATE_FAILED event of order: {record.value["order_id"]}"
-                            )
-                            sys.stdout.flush()
-
-                            # TODO: Set order as FAILED
-
-
-        except Exception as e:
-            print(e)
-            sys.stdout.flush()
+    finally:
+        await consumer.stop()
+        await producer.stop()
 
 if __name__ == "__main__":
-    consume_infinitely_stock()
+    asyncio.run(consume_infinitely_stock())

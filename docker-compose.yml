@@ -52,7 +52,7 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     command: >
       sh -c "python kafka_stock_consumer.py & python kafka_payment_consumer.py &
-      gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app"
+      hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/order_redis.env
     depends_on:
@@ -78,7 +78,7 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     command: >
       sh -c "python kafka_consumer.py &
-      gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app"
+      hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/stock_redis.env
     depends_on:
@@ -104,7 +104,7 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     command: >
       sh -c "python kafka_consumer.py &
-      gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app"
+      hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/payment_redis.env
     depends_on:

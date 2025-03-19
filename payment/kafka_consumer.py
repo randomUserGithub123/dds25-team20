@@ -1,145 +1,105 @@
-import os, sys
-from time import sleep
+import os
+import sys
+import asyncio
 
-from concurrent.futures import ThreadPoolExecutor
-import atexit
-import requests
-
-from kafka import KafkaProducer, KafkaConsumer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from msgspec import msgpack
+import aiohttp
 
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
-    "KAFKA_BOOTSTRAP_SERVERS"
-)
-
-STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
-STOCK_UPDATED = "StockUpdateSucceeded"
-STOCK_UPDATE_FAILED = "StockUpdateFailed"
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
 
 PAYMENT_REQUESTED = "PaymentRequested"
 PAYMENT_COMPLETED = "PaymentCompleted"
 PAYMENT_FAILED = "PaymentFailed"
 
-ORDER_COMPLETED = "OrderCompleted"
+async def consume_infinitely():
 
-consumer = KafkaConsumer(
-    "PAYMENT",
-    bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-    auto_offset_reset="earliest",
-    enable_auto_commit=True,
-    value_deserializer=lambda m: msgpack.decode(m),
-    key_deserializer=lambda m: m.decode("utf-8") if m else None
-)
+    consumer = AIOKafkaConsumer(
+        "PAYMENT",
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        auto_offset_reset="earliest",
+        enable_auto_commit=True,
+        value_deserializer=lambda m: msgpack.decode(m)
+    )
 
-producer = KafkaProducer(
-    bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-    value_serializer=lambda m: msgpack.encode(m),
-    key_serializer=lambda m: str(m).encode('utf-8')
-)
+    producer = AIOKafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        value_serializer=lambda m: msgpack.encode(m)
+    )
 
-thread_pool = ThreadPoolExecutor(
-    max_workers=20
-)
+    await consumer.start()
+    await producer.start()
 
-atexit.register(
-    thread_pool.shutdown
-)
-
-def try_make_payment(
-    user_id: int,
-    total_cost: int,
-    order_id: int,
-    items_quantities: dict
-):
-    
-    failed_payment_processing = False
-    
-    try:
-        response = requests.post(
-            f"""http://127.0.0.1:5000/pay/{user_id}/{total_cost}""",
-        )
-        print(
-            f"""Response: {response}"""
-        )
-        sys.stdout.flush()
-        if(
-            response.status_code != 200
-        ):
-            raise Exception()
-    except Exception as e:
-        print(e)
-        sys.stdout.flush()
-        failed_payment_processing = True
-        
-    if(
-        not failed_payment_processing
+    async def try_make_payment(
+        user_id: int,
+        total_cost: int,
+        order_id: int,
+        items_quantities: dict
     ):
-        producer.send(
-            "PAYMENT_PROCESSING",
-            {
-                "order_id": order_id,
-                "items_quantities": items_quantities,
-                "event_type": PAYMENT_COMPLETED
-            }
-        )
-        producer.flush()
-    else:
-        producer.send(
-            "PAYMENT_PROCESSING",
-            {
-                "order_id": order_id,
-                "items_quantities": items_quantities,
-                "event_type": PAYMENT_FAILED
-            }
-        )
-        producer.flush()
+        failed_payment_processing = False
 
-def consume_infinitely():
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(
+                    f"http://127.0.0.1:5000/pay/{user_id}/{total_cost}"
+                ) as resp:
+                    print(f"Response: {resp.status}")
+                    sys.stdout.flush()
+                    if resp.status != 200:
+                        raise Exception("Payment failed")
+            except Exception as e:
+                print(e)
+                sys.stdout.flush()
+                failed_payment_processing = True
 
-    consumer.subscribe([
-        "PAYMENT"
-    ])
-
-    while True:
-        try: 
-
-            raw_messages = consumer.poll(
-                timeout_ms=10
+        if not failed_payment_processing:
+            await producer.send(
+                "PAYMENT_PROCESSING",
+                {
+                    "order_id": order_id,
+                    "items_quantities": items_quantities,
+                    "event_type": PAYMENT_COMPLETED
+                }
+            )
+        else:
+            await producer.send(
+                "PAYMENT_PROCESSING",
+                {
+                    "order_id": order_id,
+                    "items_quantities": items_quantities,
+                    "event_type": PAYMENT_FAILED
+                }
             )
 
-            if not raw_messages:
-                continue
+    try:
+        async for message in consumer:
 
             print(
-                raw_messages
+                message
             )
             sys.stdout.flush()
 
-            for topic_partition, messages in raw_messages.items():
-                if(
-                    topic_partition.topic == "PAYMENT"
-                ):
-                    for record in messages:
-                        event_type = record.value["event_type"]
-                        if(
-                            event_type == PAYMENT_REQUESTED
-                        ):
-                            print(
-                                f"PAYMENT_REQUESTED event of order: {record.value["order_id"]}"
-                            )
-                            sys.stdout.flush()
+            if(
+                not message
+            ):
+                continue
 
-                            future = thread_pool.submit(
-                                try_make_payment,
-                                record.value["user_id"],
-                                record.value["total_cost"],
-                                record.value["order_id"],
-                                record.value["items_quantities"]
-                            )
+            event_type = message.value["event_type"]
+            if event_type == PAYMENT_REQUESTED:
+                print(f"PAYMENT_REQUESTED event of order: {message.value['order_id']}")
+                sys.stdout.flush()
 
-        except Exception as e:
-            print(e)
-            sys.stdout.flush()
+                asyncio.create_task(
+                    try_make_payment(
+                        message.value["user_id"],
+                        message.value["total_cost"],
+                        message.value["order_id"],
+                        message.value["items_quantities"]
+                    )
+                )
+    finally:
+        await consumer.stop()
+        await producer.stop()
 
 if __name__ == "__main__":
-    consume_infinitely()
+    asyncio.run(consume_infinitely())
