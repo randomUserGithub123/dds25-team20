@@ -1,4 +1,4 @@
-import os
+import os, sys
 import atexit
 import uuid
 import asyncio
@@ -9,6 +9,8 @@ from msgspec import msgpack, Struct
 
 DB_ERROR_STR = "DB error"
 REQ_ERROR_STR = "Requests error"
+
+lock = asyncio.Lock()
 
 app = Quart("stock-service")
 
@@ -85,16 +87,27 @@ async def add_stock(item_id: str, amount: int):
 
 @app.post('/subtract/<item_id>/<amount>')
 async def remove_stock(item_id: str, amount: int):
-    item_entry: StockValue = await get_item_from_db(item_id)
-    item_entry.stock -= int(amount)
-    app.logger.debug(f"Item: {item_id} stock updated to: {item_entry.stock}")
-    if item_entry.stock < 0:
-        abort(400, f"Item: {item_id} stock cannot get reduced below zero!")
-    try:
-        await db.set(item_id, msgpack.encode(item_entry))
-    except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
-    return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
+
+    async with lock:
+        item_entry: StockValue = await get_item_from_db(item_id)
+
+        before = item_entry.stock
+        
+        item_entry.stock -= int(amount)
+        app.logger.debug(f"Item: {item_id} stock updated to: {item_entry.stock}")
+
+        print(
+            f"""Before: {before}; After: {item_entry.stock}"""
+        )
+        sys.stdout.flush()
+        
+        if item_entry.stock < 0:
+            abort(400, f"Item: {item_id} stock cannot get reduced below zero!")
+        try:
+            await db.set(item_id, msgpack.encode(item_entry))
+        except redis.exceptions.RedisError:
+            return abort(400, DB_ERROR_STR)
+        return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8000, debug=True)
