@@ -1,6 +1,9 @@
 import requests
 
-ORDER_URL = STOCK_URL = PAYMENT_URL = "http://127.0.0.1:8000"
+# Adjust accordingly DEPENDING ON IF minikube/docker-compose is used
+minikube_url = "http://192.168.49.2:80"
+docker_compose_url = "http://127.0.0.1:8000"
+ORDER_URL = STOCK_URL = PAYMENT_URL = docker_compose_url
 
 
 ########################################################################################################################
