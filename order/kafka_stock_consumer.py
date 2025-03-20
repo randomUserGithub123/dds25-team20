@@ -31,7 +31,9 @@ async def consume_infinitely_stock():
     try:
         async for message in consumer:
             event_type = message.value["event_type"]
-            if event_type == STOCK_UPDATED:
+            if(
+                event_type == STOCK_UPDATED
+            ):
                 print(f"STOCK_UPDATED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 
@@ -46,7 +48,9 @@ async def consume_infinitely_stock():
                     }
                 )
 
-            elif event_type == STOCK_UPDATE_FAILED:
+            elif(
+                event_type == STOCK_UPDATE_FAILED
+            ):
                 print(f"STOCK_UPDATE_FAILED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 

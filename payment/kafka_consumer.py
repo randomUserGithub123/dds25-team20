@@ -31,9 +31,9 @@ async def consume_infinitely():
     await producer.start()
 
     async def try_make_payment(
-        user_id: int,
+        user_id: str,
         total_cost: int,
-        order_id: int,
+        order_id: str,
         items_quantities: dict
     ):
         failed_payment_processing = False
@@ -45,39 +45,29 @@ async def consume_infinitely():
                 ) as resp:
                     print(f"Response: {resp.status}")
                     sys.stdout.flush()
-                    if resp.status != 200:
+                    if resp.status >= 400:
                         raise Exception("Payment failed")
             except Exception as e:
                 print(e)
                 sys.stdout.flush()
                 failed_payment_processing = True
 
-        if not failed_payment_processing:
-            await producer.send(
-                "PAYMENT_PROCESSING",
-                {
-                    "order_id": order_id,
-                    "items_quantities": items_quantities,
-                    "event_type": PAYMENT_COMPLETED
-                }
-            )
-        else:
-            await producer.send(
-                "PAYMENT_PROCESSING",
-                {
-                    "order_id": order_id,
-                    "items_quantities": items_quantities,
-                    "event_type": PAYMENT_FAILED
-                }
-            )
+        await producer.send(
+            "PAYMENT_PROCESSING",
+            {
+                "order_id": order_id,
+                "items_quantities": items_quantities,
+                "user_id": user_id,
+                "total_cost": total_cost,
+                "event_type": (
+                    PAYMENT_COMPLETED if not failed_payment_processing
+                    else PAYMENT_FAILED
+                )
+            }
+        )
 
     try:
         async for message in consumer:
-
-            print(
-                message
-            )
-            sys.stdout.flush()
 
             if(
                 not message
@@ -85,7 +75,9 @@ async def consume_infinitely():
                 continue
 
             event_type = message.value["event_type"]
-            if event_type == PAYMENT_REQUESTED:
+            if(
+                event_type == PAYMENT_REQUESTED
+            ):
                 print(f"PAYMENT_REQUESTED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 

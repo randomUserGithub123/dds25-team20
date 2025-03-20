@@ -1,11 +1,12 @@
 import os, sys
 import atexit
 import uuid
+import random
 import asyncio
 from collections import defaultdict
 
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
-from quart import Quart, jsonify, abort, Response, request
+from quart import Quart, jsonify, abort, Response
 import redis
 from msgspec import msgpack, Struct
 import aiohttp
@@ -31,13 +32,6 @@ app = Quart("order-service")
 GATEWAY_URL = os.environ["GATEWAY_URL"]
 KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
 
-# db = redis.asyncio.Redis(
-#     host=os.environ["REDIS_HOST"],
-#     port=int(os.environ["REDIS_PORT"]),
-#     password=os.environ["REDIS_PASSWORD"],
-#     db=int(os.environ["REDIS_DB"])
-# )
-
 db = redis.asyncio.cluster.RedisCluster(
     host=os.environ["REDIS_HOST"],
     port=int(os.environ["REDIS_PORT"]),
@@ -62,6 +56,10 @@ async def get_order_from_db(order_id: str) -> OrderValue | None:
         return msgpack.decode(entry, type=OrderValue) if entry else None
     except redis.exceptions.RedisError:
         abort(400, DB_ERROR_STR)
+    entry: OrderValue | None = msgpack.decode(entry, type=OrderValue) if entry else None
+    if entry is None:
+        abort(400, f"Order: {order_id} not found!")
+    return entry
 
 producer = None
 
@@ -109,7 +107,9 @@ async def shutdown():
     await close_kafka_producer()
 
 @app.post("/create/<user_id>")
-async def create_order(user_id: str):
+async def create_order(
+    user_id: str
+):
     key = str(uuid.uuid4())
     value = msgpack.encode(OrderValue(paid=False, items=[], user_id=user_id, total_cost=0))
     try:
@@ -118,8 +118,55 @@ async def create_order(user_id: str):
         return abort(400, DB_ERROR_STR)
     return jsonify({"order_id": key})
 
+@app.post('/batch_init/<int:n>/<int:n_items>/<int:n_users>/<int:item_price>')
+async def batch_init_users(
+    n: int, 
+    n_items: int, 
+    n_users: int, 
+    item_price: int
+):
+    
+    def generate_entry() -> OrderValue:
+        user_id = random.randint(0, n_users - 1)
+        item1_id = random.randint(0, n_items - 1)
+        item2_id = random.randint(0, n_items - 1)
+        value = OrderValue(paid=False,
+                           items=[(f"{item1_id}", 1), (f"{item2_id}", 1)],
+                           user_id=f"{user_id}",
+                           total_cost=2*item_price)
+        return value
+
+    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(generate_entry())
+                                  for i in range(n)}
+    try:
+        await db.mset(kv_pairs)
+    except redis.exceptions.RedisError:
+        return abort(400, DB_ERROR_STR)
+    return jsonify({"msg": "Batch init for orders successful"})
+
+@app.get('/find/<order_id>')
+async def find_order(
+    order_id: str
+):
+    
+    order_entry = await get_order_from_db(order_id)
+    return jsonify(
+        {
+            "order_id": order_id,
+            "paid": order_entry.paid,
+            "items": order_entry.items,
+            "user_id": order_entry.user_id,
+            "total_cost": order_entry.total_cost
+        }
+    )
+
 @app.post("/addItem/<order_id>/<item_id>/<quantity>")
-async def add_item(order_id: str, item_id: str, quantity: int):
+async def add_item(
+    order_id: str, 
+    item_id: str, 
+    quantity: int
+):
+
     order_entry = await get_order_from_db(order_id)
     
     async with aiohttp.ClientSession() as session:

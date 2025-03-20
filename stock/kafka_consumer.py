@@ -13,6 +13,7 @@ STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
 STOCK_UPDATED = "StockUpdateSucceeded"
 STOCK_UPDATE_FAILED = "StockUpdateFailed"
 
+PAYMENT_FAILED = "PaymentFailed"
 
 async def consume_infinitely():
     consumer = AIOKafkaConsumer(
@@ -31,11 +32,12 @@ async def consume_infinitely():
     await producer.start()
 
     async def try_update_stock(
-        order_id: int, 
+        order_id: str, 
         items_quantities: dict, 
-        user_id: int, 
+        user_id: str, 
         total_cost: int
     ):
+
         failed_stock_processing = False
         removed_items = defaultdict(int)
 
@@ -53,20 +55,15 @@ async def consume_infinitely():
                     print(e)
                     sys.stdout.flush()
                     
-                    await remove_stock(
-                        items_quantities=removed_items
+                    asyncio.create_task(
+                        readd_stock(
+                            removed_items,
+                            order_id,
+                            user_id,
+                            total_cost
+                        )
                     )
 
-                    await producer.send(
-                        "STOCK_PROCESSING",
-                        {
-                            "order_id": order_id,
-                            "items_quantities": items_quantities,
-                            "user_id": user_id,
-                            "total_cost": total_cost,
-                            "event_type": STOCK_UPDATE_FAILED
-                        }
-                    )
                     failed_stock_processing = True
                     break
                 removed_items[item_id] = quantity
@@ -83,8 +80,11 @@ async def consume_infinitely():
                 }
             )
 
-    async def remove_stock(
-        items_quantities: dict
+    async def readd_stock(
+        items_quantities: dict,
+        order_id: str,
+        user_id: str,
+        total_cost: int
     ):
         async with aiohttp.ClientSession() as session:
             for item_id, quantity in items_quantities.items():
@@ -100,11 +100,26 @@ async def consume_infinitely():
                         ):
                             added_item = True
 
+        await producer.send(
+            "STOCK_PROCESSING",
+            {
+                "order_id": order_id,
+                "items_quantities": items_quantities,
+                "user_id": user_id,
+                "total_cost": total_cost,
+                "event_type": STOCK_UPDATE_FAILED
+            }
+        )
+
 
     try:
         async for message in consumer:
+
             event_type = message.value["event_type"]
-            if event_type == STOCK_UPDATE_REQUESTED:
+
+            if(
+                event_type == STOCK_UPDATE_REQUESTED
+            ):
                 print(f"STOCK_UPDATE_REQUESTED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 
@@ -116,13 +131,18 @@ async def consume_infinitely():
                         message.value["total_cost"]
                     )
                 )
-            elif event_type == STOCK_UPDATE_FAILED:
+            elif(
+                event_type == PAYMENT_FAILED
+            ):
                 print(f"STOCK_UPDATE_FAILED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 
                 asyncio.create_task(
-                    remove_stock(
-                        message.value["items_quantities"]
+                    readd_stock(
+                        message.value["items_quantities"],
+                        message.value['order_id'],
+                        message.value['user_id'],
+                        message.value['total_cost']
                     )
                 )
     finally:

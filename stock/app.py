@@ -12,13 +12,6 @@ REQ_ERROR_STR = "Requests error"
 
 app = Quart("stock-service")
 
-# db = redis.asyncio.Redis(
-#     host=os.environ["REDIS_HOST"],
-#     port=int(os.environ["REDIS_PORT"]),
-#     password=os.environ["REDIS_PASSWORD"],
-#     db=int(os.environ["REDIS_DB"]),
-# )
-
 db = redis.asyncio.cluster.RedisCluster(
     host=os.environ["REDIS_HOST"],
     port=int(os.environ["REDIS_PORT"]),
@@ -38,12 +31,17 @@ class StockValue(Struct):
 async def get_item_from_db(item_id: str) -> StockValue | None:
     try:
         entry: bytes = await db.get(item_id)
-        return msgpack.decode(entry, type=StockValue) if entry else None
     except redis.exceptions.RedisError:
-        abort(400, DB_ERROR_STR)
+        return abort(400, DB_ERROR_STR)
+    entry: StockValue | None = msgpack.decode(entry, type=StockValue) if entry else None
+    if entry is None:
+        abort(400, f"Item: {item_id} not found!")
+    return entry
 
 @app.post('/item/create/<price>')
-async def create_item(price: int):
+async def create_item(
+    price: int
+):
     key = str(uuid.uuid4())
     app.logger.debug(f"Item: {key} created")
     value = msgpack.encode(StockValue(stock=0, price=int(price)))
@@ -54,11 +52,16 @@ async def create_item(price: int):
     return jsonify({'item_id': key})
 
 @app.post('/batch_init/<n>/<starting_stock>/<item_price>')
-async def batch_init_users(n: int, starting_stock: int, item_price: int):
+async def batch_init_users(
+    n: int, 
+    starting_stock: int, 
+    item_price: int
+):
     n = int(n)
     starting_stock = int(starting_stock)
     item_price = int(item_price)
-    kv_pairs = {f"{i}": msgpack.encode(StockValue(stock=starting_stock, price=item_price)) for i in range(n)}
+    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(StockValue(stock=starting_stock, price=item_price))
+                                  for i in range(n)}
     try:
         await db.mset(kv_pairs)
     except redis.exceptions.RedisError:
@@ -72,7 +75,7 @@ async def find_item(item_id: str):
 
 @app.post('/add/<item_id>/<amount>')
 async def add_stock(item_id: str, amount: int):
-    item_entry = await get_item_from_db(item_id)
+    item_entry: StockValue = await get_item_from_db(item_id)
     item_entry.stock += int(amount)
     try:
         await db.set(item_id, msgpack.encode(item_entry))
@@ -82,7 +85,7 @@ async def add_stock(item_id: str, amount: int):
 
 @app.post('/subtract/<item_id>/<amount>')
 async def remove_stock(item_id: str, amount: int):
-    item_entry = await get_item_from_db(item_id)
+    item_entry: StockValue = await get_item_from_db(item_id)
     item_entry.stock -= int(amount)
     app.logger.debug(f"Item: {item_id} stock updated to: {item_entry.stock}")
     if item_entry.stock < 0:

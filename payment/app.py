@@ -15,13 +15,6 @@ DB_ERROR_STR = "DB error"
 
 app = Quart("payment-service")
 
-# db = redis.asyncio.Redis(
-#     host=os.environ["REDIS_HOST"],
-#     port=int(os.environ["REDIS_PORT"]),
-#     password=os.environ["REDIS_PASSWORD"],
-#     db=int(os.environ["REDIS_DB"]),
-# )
-
 db = redis.asyncio.cluster.RedisCluster(
     host=os.environ["REDIS_HOST"],
     port=int(os.environ["REDIS_PORT"]),
@@ -40,9 +33,12 @@ class UserValue(Struct):
 async def get_user_from_db(user_id: str) -> UserValue | None:
     try:
         entry: bytes = await db.get(user_id)
-        return msgpack.decode(entry, type=UserValue) if entry else None
     except redis.exceptions.RedisError:
-        abort(400, DB_ERROR_STR)
+        return abort(400, DB_ERROR_STR)
+    entry: UserValue | None = msgpack.decode(entry, type=UserValue) if entry else None
+    if entry is None:
+        abort(400, f"User: {user_id} not found!")
+    return entry
 
 @app.post('/create_user')
 async def create_user():
@@ -55,7 +51,10 @@ async def create_user():
     return jsonify({'user_id': key})
 
 @app.post('/batch_init/<n>/<starting_money>')
-async def batch_init_users(n: int, starting_money: int):
+async def batch_init_users(
+    n: int, 
+    starting_money: int
+):
     n = int(n)
     starting_money = int(starting_money)
     kv_pairs = {f"{i}": msgpack.encode(UserValue(credit=starting_money)) for i in range(n)}
@@ -66,12 +65,20 @@ async def batch_init_users(n: int, starting_money: int):
     return jsonify({"msg": "Batch init for users successful"})
 
 @app.get('/find_user/<user_id>')
-async def find_user(user_id: str):
+async def find_user(
+    user_id: str
+):
     user_entry = await get_user_from_db(user_id)
-    return jsonify({"user_id": user_id, "credit": user_entry.credit})
+    return jsonify({
+        "user_id": user_id, 
+        "credit": user_entry.credit}
+    )
 
 @app.post('/add_funds/<user_id>/<amount>')
-async def add_credit(user_id: str, amount: int):
+async def add_credit(
+    user_id: str, 
+    amount: int
+):
     user_entry = await get_user_from_db(user_id)
     user_entry.credit += int(amount)
     try:
@@ -81,7 +88,10 @@ async def add_credit(user_id: str, amount: int):
     return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status=200)
 
 @app.post('/pay/<user_id>/<amount>')
-async def remove_credit(user_id: str, amount: int):
+async def remove_credit(
+    user_id: str, 
+    amount: int
+):
     app.logger.debug(f"Removing {amount} credit from user: {user_id}")
     user_entry = await get_user_from_db(user_id)
     user_entry.credit -= int(amount)

@@ -3,7 +3,6 @@ import sys
 import asyncio
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-import aiohttp
 from msgspec import msgpack
 
 KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS")
@@ -31,7 +30,9 @@ async def consume_infinitely_payment():
     try:
         async for message in consumer:
             event_type = message.value["event_type"]
-            if event_type == PAYMENT_COMPLETED:
+            if(
+                event_type == PAYMENT_COMPLETED
+            ):
                 print(f"PAYMENT_COMPLETED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 
@@ -43,7 +44,9 @@ async def consume_infinitely_payment():
                     }
                 )
 
-            elif event_type == PAYMENT_FAILED:
+            elif(
+                event_type == PAYMENT_FAILED
+            ):
                 print(f"PAYMENT_FAILED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 
@@ -52,15 +55,9 @@ async def consume_infinitely_payment():
                     {
                         "order_id": message.value["order_id"],
                         "items_quantities": message.value["items_quantities"],
-                        "event_type": STOCK_UPDATE_FAILED
-                    }
-                )
-
-                await producer.send(
-                    "ORDER_STATUS_UPDATE",
-                    {
-                        "order_id": message.value['order_id'], 
-                        "status": 'FAILED'
+                        "user_id": message.value["user_id"],
+                        "total_cost": message.value["total_cost"],
+                        "event_type": PAYMENT_FAILED
                     }
                 )
 
