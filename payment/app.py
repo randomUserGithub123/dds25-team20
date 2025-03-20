@@ -1,4 +1,4 @@
-import os
+import os, sys
 import atexit
 import uuid
 import asyncio
@@ -6,6 +6,8 @@ import asyncio
 from quart import Quart, jsonify, abort, Response
 import redis
 from msgspec import msgpack, Struct
+
+lock = asyncio.Lock()
 
 PAYMENT_REQUESTED = "PaymentRequested"
 PAYMENT_COMPLETED = "PaymentCompleted"
@@ -92,16 +94,26 @@ async def remove_credit(
     user_id: str, 
     amount: int
 ):
-    app.logger.debug(f"Removing {amount} credit from user: {user_id}")
-    user_entry = await get_user_from_db(user_id)
-    user_entry.credit -= int(amount)
-    if user_entry.credit < 0:
-        abort(400, f"User: {user_id} credit cannot get reduced below zero!")
-    try:
-        await db.set(user_id, msgpack.encode(user_entry))
-    except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
-    return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status=200)
+    async with lock:
+        app.logger.debug(f"Removing {amount} credit from user: {user_id}")
+        user_entry = await get_user_from_db(user_id)
+
+        before = user_entry.credit
+
+        user_entry.credit -= int(amount)
+
+        print(
+            f"Before: {before}; After: {user_entry.credit}"
+        )
+        sys.stdout.flush()
+
+        if user_entry.credit < 0:
+            abort(400, f"User: {user_id} credit cannot get reduced below zero!")
+        try:
+            await db.set(user_id, msgpack.encode(user_entry))
+        except redis.exceptions.RedisError:
+            return abort(400, DB_ERROR_STR)
+        return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status=200)
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8000, debug=True)

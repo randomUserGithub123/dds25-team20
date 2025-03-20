@@ -151,7 +151,7 @@ services:
         echo 'Waiting for Redis cluster to be ready...';
         sleep 5;
       done; python kafka_consumer.py &
-      hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app"
+      hypercorn -b 0.0.0.0:5000 -w 1 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/stock_redis.env
     depends_on:
@@ -244,7 +244,7 @@ services:
         echo 'Waiting for Redis cluster to be ready...';
         sleep 5;
       done; python kafka_consumer.py &
-      hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app"
+      hypercorn -b 0.0.0.0:5000 -w 1 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/payment_redis.env
     depends_on:
