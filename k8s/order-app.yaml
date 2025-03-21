@@ -28,6 +28,7 @@ spec:
       containers:
         - name: order
           image: order:latest
+          imagePullPolicy: IfNotPresent
           resources:
             limits:
               memory: "1Gi"
@@ -40,15 +41,15 @@ spec:
           ports:
             - containerPort: 5000
           env:
+            - name: GATEWAY_URL
+              value: "http://192.168.49.2"
             - name: USER_SERVICE_URL
               value: "user-service"
             - name: STOCK_SERVICE_URL
               value: "stock-service"
             - name: REDIS_HOST
-              value: redis-master
+              value: order-redis-cluster
             - name: REDIS_PORT
               value: '6379'
             - name: REDIS_PASSWORD
               value: "redis"
-            - name: REDIS_DB
-              value: "0"

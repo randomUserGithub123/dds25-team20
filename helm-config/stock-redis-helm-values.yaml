@@ -1,0 +1,9 @@
+cluster:
+  nodes: 6
+  replicas: 1
+
+usePassword: true
+password: "redis"
+
+persistence:
+  enabled: false

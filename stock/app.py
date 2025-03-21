@@ -1,117 +1,159 @@
-import logging
-import os
+import os, sys
 import atexit
 import uuid
+import asyncio
 
+from quart import Quart, jsonify, abort, Response
 import redis
-
 from msgspec import msgpack, Struct
-from flask import Flask, jsonify, abort, Response
-
 
 DB_ERROR_STR = "DB error"
+REQ_ERROR_STR = "Requests error"
 
-app = Flask("stock-service")
+app = Quart("stock-service")
 
-db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
-                              port=int(os.environ['REDIS_PORT']),
-                              password=os.environ['REDIS_PASSWORD'],
-                              db=int(os.environ['REDIS_DB']))
+db = redis.asyncio.cluster.RedisCluster(
+    host=os.environ["REDIS_HOST"],
+    port=int(os.environ["REDIS_PORT"]),
+    password=os.environ["REDIS_PASSWORD"],
+    decode_responses=False
+)
 
-
-def close_db_connection():
-    db.close()
-
+def close_db_connection() -> None:
+    asyncio.create_task(db.close())
 
 atexit.register(close_db_connection)
-
 
 class StockValue(Struct):
     stock: int
     price: int
 
-
-def get_item_from_db(item_id: str) -> StockValue | None:
-    # get serialized data
+async def get_item_from_db(item_id: str) -> StockValue | None:
     try:
-        entry: bytes = db.get(item_id)
+        entry: bytes = await db.get(item_id)
     except redis.exceptions.RedisError:
         return abort(400, DB_ERROR_STR)
-    # deserialize data if it exists else return null
     entry: StockValue | None = msgpack.decode(entry, type=StockValue) if entry else None
     if entry is None:
-        # if item does not exist in the database; abort
         abort(400, f"Item: {item_id} not found!")
     return entry
 
+async def acquire_redis_lock(
+    item_id: str
+):
+    
+    timeout = 10
+    retry_interval = 0.1
+
+    lock_key = str(
+        "lock_"
+        +
+        item_id
+    )
+    lock_value = str(uuid.uuid4())
+
+    while True:
+        try:
+
+            result = await db.set(
+                lock_key,
+                lock_value,
+                nx=True,
+                ex=timeout
+            )
+            if result:
+                return True
+            else:
+                await asyncio.sleep(retry_interval)
+        except redis.exceptions.RedisError as e:
+            return False
+        
+async def release_redis_lock(
+    item_id: str
+):
+    
+    lock_key = str(
+        "lock_"
+        +
+        item_id
+    )
+    try:
+        await db.delete(lock_key)
+        return True
+    except redis.exceptions.RedisError as e:
+        return False
 
 @app.post('/item/create/<price>')
-def create_item(price: int):
+async def create_item(
+    price: int
+):
     key = str(uuid.uuid4())
     app.logger.debug(f"Item: {key} created")
     value = msgpack.encode(StockValue(stock=0, price=int(price)))
     try:
-        db.set(key, value)
+        await db.set(key, value)
     except redis.exceptions.RedisError:
         return abort(400, DB_ERROR_STR)
     return jsonify({'item_id': key})
 
-
 @app.post('/batch_init/<n>/<starting_stock>/<item_price>')
-def batch_init_users(n: int, starting_stock: int, item_price: int):
+async def batch_init_users(
+    n: int, 
+    starting_stock: int, 
+    item_price: int
+):
     n = int(n)
     starting_stock = int(starting_stock)
     item_price = int(item_price)
-    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(StockValue(stock=starting_stock, price=item_price))
-                                  for i in range(n)}
+    
+    tasks = [
+        db.set(f"{i}", msgpack.encode(StockValue(stock=starting_stock, price=item_price)))
+        for i in range(n)
+    ]
+
     try:
-        db.mset(kv_pairs)
+        await asyncio.gather(*tasks)
     except redis.exceptions.RedisError:
         return abort(400, DB_ERROR_STR)
+
     return jsonify({"msg": "Batch init for stock successful"})
 
-
 @app.get('/find/<item_id>')
-def find_item(item_id: str):
-    item_entry: StockValue = get_item_from_db(item_id)
-    return jsonify(
-        {
-            "stock": item_entry.stock,
-            "price": item_entry.price
-        }
-    )
-
+async def find_item(item_id: str):
+    item_entry = await get_item_from_db(item_id)
+    return jsonify({"stock": item_entry.stock, "price": item_entry.price})
 
 @app.post('/add/<item_id>/<amount>')
-def add_stock(item_id: str, amount: int):
-    item_entry: StockValue = get_item_from_db(item_id)
-    # update stock, serialize and update database
+async def add_stock(item_id: str, amount: int):
+    item_entry: StockValue = await get_item_from_db(item_id)
     item_entry.stock += int(amount)
     try:
-        db.set(item_id, msgpack.encode(item_entry))
+        await db.set(item_id, msgpack.encode(item_entry))
     except redis.exceptions.RedisError:
         return abort(400, DB_ERROR_STR)
     return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
-
 
 @app.post('/subtract/<item_id>/<amount>')
-def remove_stock(item_id: str, amount: int):
-    item_entry: StockValue = get_item_from_db(item_id)
-    # update stock, serialize and update database
+async def remove_stock(item_id: str, amount: int):
+
+    await acquire_redis_lock(item_id)
+
+    item_entry: StockValue = await get_item_from_db(item_id)
+    
     item_entry.stock -= int(amount)
     app.logger.debug(f"Item: {item_id} stock updated to: {item_entry.stock}")
+    
     if item_entry.stock < 0:
+        await release_redis_lock(item_id)
         abort(400, f"Item: {item_id} stock cannot get reduced below zero!")
     try:
-        db.set(item_id, msgpack.encode(item_entry))
+        await db.set(item_id, msgpack.encode(item_entry))
     except redis.exceptions.RedisError:
+        await release_redis_lock(item_id)
         return abort(400, DB_ERROR_STR)
+    
+    await release_redis_lock(item_id)
     return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
-
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8000, debug=True)
-else:
-    gunicorn_logger = logging.getLogger('gunicorn.error')
-    app.logger.handlers = gunicorn_logger.handlers
-    app.logger.setLevel(gunicorn_logger.level)

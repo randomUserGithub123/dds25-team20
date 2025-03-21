@@ -1,5 +1,37 @@
 version: "3"
 services:
+  zookeeper:
+    restart: always
+    image: docker.io/bitnami/zookeeper:3.8
+    ports:
+      - "2181:2181"
+    volumes:
+      - "zookeeper-volume:/bitnami"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  kafka:
+    restart: always
+    image: docker.io/bitnami/kafka:3.3
+    ports:
+      - "9093:9093"
+    volumes:
+      - "kafka-volume:/bitnami"
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka:9092,EXTERNAL://localhost:9093
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=CLIENT
+    depends_on:
+      - zookeeper
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   gateway:
     image: nginx:1.25-bookworm
@@ -17,38 +49,319 @@ services:
     image: order:latest
     environment:
       - GATEWAY_URL=http://gateway:80
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_HOST=order-redis-node-0
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis
+    command: >
+      sh -c "while ! redis-cli -h order-redis-node-0 -a redis cluster info | grep -q 'cluster_state:ok'; do
+        echo 'Waiting for Redis cluster to be ready...';
+        sleep 5;
+      done; python kafka_stock_consumer.py & python kafka_payment_consumer.py &
+      hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/order_redis.env
     depends_on:
-      - order-db
+      kafka:
+        condition: service_healthy
+      order-redis-node-0:
+        condition: service_started
+      order-redis-node-1:
+        condition: service_started
+      order-redis-node-2:
+        condition: service_started
+      order-redis-node-3:
+        condition: service_started
+      order-redis-node-4:
+        condition: service_started
+      order-redis-node-5:
+        condition: service_started
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
 
-  order-db:
-    image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+  # order-db:
+  #   image: redis:7.2-bookworm
+  #   command: redis-server --requirepass redis --maxmemory 512mb
+
+  order-redis-node-0:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - order_redis_data_0:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=order-redis-node-0 order-redis-node-1 order-redis-node-2 order-redis-node-3 order-redis-node-4 order-redis-node-5'
+
+  order-redis-node-1:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - order_redis_data_1:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=order-redis-node-0 order-redis-node-1 order-redis-node-2 order-redis-node-3 order-redis-node-4 order-redis-node-5'
+
+  order-redis-node-2:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - order_redis_data_2:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=order-redis-node-0 order-redis-node-1 order-redis-node-2 order-redis-node-3 order-redis-node-4 order-redis-node-5'
+
+  order-redis-node-3:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - order_redis_data_3:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=order-redis-node-0 order-redis-node-1 order-redis-node-2 order-redis-node-3 order-redis-node-4 order-redis-node-5'
+
+  order-redis-node-4:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - order_redis_data_4:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=order-redis-node-0 order-redis-node-1 order-redis-node-2 order-redis-node-3 order-redis-node-4 order-redis-node-5'
+
+  order-redis-node-5:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - order_redis_data_5:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDISCLI_AUTH=redis'
+      - 'REDIS_CLUSTER_REPLICAS=1'
+      - 'REDIS_NODES=order-redis-node-0 order-redis-node-1 order-redis-node-2 order-redis-node-3 order-redis-node-4 order-redis-node-5'
+      - 'REDIS_CLUSTER_CREATOR=yes'
 
   stock-service:
     build: ./stock
     image: stock:latest
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_HOST=stock-redis-node-0
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis
+    command: >
+      sh -c "while ! redis-cli -h stock-redis-node-0 -a redis cluster info | grep -q 'cluster_state:ok'; do
+        echo 'Waiting for Redis cluster to be ready...';
+        sleep 5;
+      done; python kafka_consumer.py &
+      hypercorn -b 0.0.0.0:5000 -w 1 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/stock_redis.env
     depends_on:
-      - stock-db
+      kafka:
+        condition: service_healthy
+      stock-redis-node-0:
+        condition: service_started
+      stock-redis-node-1:
+        condition: service_started
+      stock-redis-node-2:
+        condition: service_started
+      stock-redis-node-3:
+        condition: service_started
+      stock-redis-node-4:
+        condition: service_started
+      stock-redis-node-5:
+        condition: service_started
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
 
-  stock-db:
-    image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+  # stock-db:
+  #   image: redis:7.2-bookworm
+  #   command: redis-server --requirepass redis --maxmemory 512mb
+
+  stock-redis-node-0:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - stock_redis_data_0:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=stock-redis-node-0 stock-redis-node-1 stock-redis-node-2 stock-redis-node-3 stock-redis-node-4 stock-redis-node-5'
+
+  stock-redis-node-1:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - stock_redis_data_1:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=stock-redis-node-0 stock-redis-node-1 stock-redis-node-2 stock-redis-node-3 stock-redis-node-4 stock-redis-node-5'
+
+  stock-redis-node-2:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - stock_redis_data_2:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=stock-redis-node-0 stock-redis-node-1 stock-redis-node-2 stock-redis-node-3 stock-redis-node-4 stock-redis-node-5'
+
+  stock-redis-node-3:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - stock_redis_data_3:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=stock-redis-node-0 stock-redis-node-1 stock-redis-node-2 stock-redis-node-3 stock-redis-node-4 stock-redis-node-5'
+
+  stock-redis-node-4:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - stock_redis_data_4:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=stock-redis-node-0 stock-redis-node-1 stock-redis-node-2 stock-redis-node-3 stock-redis-node-4 stock-redis-node-5'
+
+  stock-redis-node-5:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - stock_redis_data_5:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDISCLI_AUTH=redis'
+      - 'REDIS_CLUSTER_REPLICAS=1'
+      - 'REDIS_NODES=stock-redis-node-0 stock-redis-node-1 stock-redis-node-2 stock-redis-node-3 stock-redis-node-4 stock-redis-node-5'
+      - 'REDIS_CLUSTER_CREATOR=yes'
 
   payment-service:
     build: ./payment
     image: user:latest
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_HOST=payment-redis-node-0
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis
+    command: >
+      sh -c "while ! redis-cli -h payment-redis-node-0 -a redis cluster info | grep -q 'cluster_state:ok'; do
+        echo 'Waiting for Redis cluster to be ready...';
+        sleep 5;
+      done; python kafka_consumer.py &
+      hypercorn -b 0.0.0.0:5000 -w 1 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/payment_redis.env
     depends_on:
-      - payment-db
+      kafka:
+        condition: service_healthy
+      payment-redis-node-0:
+        condition: service_started
+      payment-redis-node-1:
+        condition: service_started
+      payment-redis-node-2:
+        condition: service_started
+      payment-redis-node-3:
+        condition: service_started
+      payment-redis-node-4:
+        condition: service_started
+      payment-redis-node-5:
+        condition: service_started
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
 
-  payment-db:
-    image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+  # payment-db:
+  #   image: redis:7.2-bookworm
+  #   command: redis-server --requirepass redis --maxmemory 512mb
+
+  payment-redis-node-0:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - payment_redis_data_0:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=payment-redis-node-0 payment-redis-node-1 payment-redis-node-2 payment-redis-node-3 payment-redis-node-4 payment-redis-node-5'
+
+  payment-redis-node-1:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - payment_redis_data_1:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=payment-redis-node-0 payment-redis-node-1 payment-redis-node-2 payment-redis-node-3 payment-redis-node-4 payment-redis-node-5'
+
+  payment-redis-node-2:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - payment_redis_data_2:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=payment-redis-node-0 payment-redis-node-1 payment-redis-node-2 payment-redis-node-3 payment-redis-node-4 payment-redis-node-5'
+
+  payment-redis-node-3:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - payment_redis_data_3:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=payment-redis-node-0 payment-redis-node-1 payment-redis-node-2 payment-redis-node-3 payment-redis-node-4 payment-redis-node-5'
+
+  payment-redis-node-4:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - payment_redis_data_4:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDIS_NODES=payment-redis-node-0 payment-redis-node-1 payment-redis-node-2 payment-redis-node-3 payment-redis-node-4 payment-redis-node-5'
+
+  payment-redis-node-5:
+    image: docker.io/bitnami/redis-cluster:7.4
+    volumes:
+      - payment_redis_data_5:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=redis'
+      - 'REDISCLI_AUTH=redis'
+      - 'REDIS_CLUSTER_REPLICAS=1'
+      - 'REDIS_NODES=payment-redis-node-0 payment-redis-node-1 payment-redis-node-2 payment-redis-node-3 payment-redis-node-4 payment-redis-node-5'
+      - 'REDIS_CLUSTER_CREATOR=yes'
+
+volumes:
+  kafka-volume:
+    driver: local
+  zookeeper-volume:
+    driver: local
+  order_redis_data_0:
+    driver: local
+  order_redis_data_1:
+    driver: local
+  order_redis_data_2:
+    driver: local
+  order_redis_data_3:
+    driver: local
+  order_redis_data_4:
+    driver: local
+  order_redis_data_5:
+    driver: local
+  stock_redis_data_0:
+    driver: local
+  stock_redis_data_1:
+    driver: local
+  stock_redis_data_2:
+    driver: local
+  stock_redis_data_3:
+    driver: local
+  stock_redis_data_4:
+    driver: local
+  stock_redis_data_5:
+    driver: local
+  payment_redis_data_0:
+    driver: local
+  payment_redis_data_1:
+    driver: local
+  payment_redis_data_2:
+    driver: local
+  payment_redis_data_3:
+    driver: local
+  payment_redis_data_4:
+    driver: local
+  payment_redis_data_5:
+    driver: local
