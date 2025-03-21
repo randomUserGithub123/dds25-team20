@@ -61,6 +61,51 @@ async def get_order_from_db(order_id: str) -> OrderValue | None:
         abort(400, f"Order: {order_id} not found!")
     return entry
 
+async def acquire_redis_lock(
+    order_id: str
+):
+    
+    timeout = 10
+    retry_interval = 0.1
+
+    lock_key = str(
+        "lock_"
+        +
+        order_id
+    )
+    lock_value = str(uuid.uuid4())
+
+    while True:
+        try:
+
+            result = await db.set(
+                lock_key,
+                lock_value,
+                nx=True,
+                ex=timeout
+            )
+            if result:
+                return True
+            else:
+                await asyncio.sleep(retry_interval)
+        except redis.exceptions.RedisError as e:
+            return False
+        
+async def release_redis_lock(
+    order_id: str
+):
+    
+    lock_key = str(
+        "lock_"
+        +
+        order_id
+    )
+    try:
+        await db.delete(lock_key)
+        return True
+    except redis.exceptions.RedisError as e:
+        return False
+
 producer = None
 
 async def create_kafka_producer():
@@ -135,13 +180,17 @@ async def batch_init_users(
                            user_id=f"{user_id}",
                            total_cost=2*item_price)
         return value
+    
+    tasks = [
+        db.set(f"{i}", msgpack.encode(generate_entry()))
+        for i in range(n)
+    ]
 
-    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(generate_entry())
-                                  for i in range(n)}
     try:
-        await db.mset(kv_pairs)
+        await asyncio.gather(*tasks)
     except redis.exceptions.RedisError:
         return abort(400, DB_ERROR_STR)
+    
     return jsonify({"msg": "Batch init for orders successful"})
 
 @app.get('/find/<order_id>')
@@ -192,6 +241,8 @@ async def add_item(
 @app.post("/checkout/<order_id>")
 async def checkout(order_id: str):
 
+    await acquire_redis_lock(order_id)
+
     app.logger.debug(f"Checking out {order_id}")
     order_entry = await get_order_from_db(order_id)
     app.logger.info("[ORDER]: Initiating checkout for order: %s", order_id)
@@ -221,6 +272,7 @@ async def checkout(order_id: str):
     if(
         order_status[order_id] == "FAILED"
     ):
+        await release_redis_lock(order_id)
         del order_status[order_id]
         del order_events[order_id]
         abort(400, "User out of credit")
@@ -231,11 +283,13 @@ async def checkout(order_id: str):
         try:
             await db.set(order_id, msgpack.encode(order_entry))
         except redis.exceptions.RedisError:
+            await release_redis_lock(order_id)
             del order_status[order_id]
             del order_events[order_id]
             return abort(400, DB_ERROR_STR)
         app.logger.debug("Checkout successful")
 
+        await release_redis_lock(order_id)
         del order_status[order_id]
         del order_events[order_id]
 
