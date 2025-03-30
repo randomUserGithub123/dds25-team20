@@ -51,7 +51,7 @@ spec:
             - containerPort: 5000
           env:
             - name: GATEWAY_URL
-              value: "http://gateway:80"
+              value: "http://192.168.49.2"
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: "my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
             - name: REDIS_HOST
@@ -60,8 +60,3 @@ spec:
               value: "6379"
             - name: REDIS_PASSWORD
               value: "redis"
-          readinessProbe:
-            exec:
-              command: ["redis-cli", "-h", "order-redis-cluster", "-a", "redis", "cluster", "info"]
-            initialDelaySeconds: 5
-            periodSeconds: 10

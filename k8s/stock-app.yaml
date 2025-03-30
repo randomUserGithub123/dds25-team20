@@ -57,8 +57,3 @@ spec:
               value: "6379"
             - name: REDIS_PASSWORD
               value: "redis"
-          readinessProbe:
-            exec:
-              command: ["redis-cli", "-h", "stock-redis-cluster", "-a", "redis", "cluster", "info"]
-            initialDelaySeconds: 5
-            periodSeconds: 10
