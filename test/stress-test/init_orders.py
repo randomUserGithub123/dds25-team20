@@ -5,9 +5,11 @@ import os
 
 import aiohttp
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(levelname)s - %(asctime)s - %(name)s - %(message)s',
-                    datefmt='%I:%M:%S')
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s - %(asctime)s - %(name)s - %(message)s",
+    datefmt="%I:%M:%S",
+)
 logger = logging.getLogger(__name__)
 
 NUMBER_0F_ITEMS = 100_000
@@ -18,30 +20,36 @@ USER_STARTING_CREDIT = 1_000_000
 NUMBER_OF_ORDERS = 100_000
 
 
-with open(os.path.join('..', 'urls.json')) as f:
+with open(os.path.join("..", "urls.json")) as f:
     urls = json.load(f)
-    ORDER_URL = urls['ORDER_URL']
-    PAYMENT_URL = urls['PAYMENT_URL']
-    STOCK_URL = urls['STOCK_URL']
+    ORDER_URL = urls["ORDER_URL"]
+    PAYMENT_URL = urls["PAYMENT_URL"]
+    STOCK_URL = urls["STOCK_URL"]
 
 
 async def populate_databases():
     async with aiohttp.ClientSession() as session:
         logger.info("Batch creating users ...")
-        url: str = (f"{PAYMENT_URL}/payment/batch_init/"
-                    f"{NUMBER_OF_USERS}/{USER_STARTING_CREDIT}")
+        url: str = (
+            f"{PAYMENT_URL}/payment/batch_init/"
+            f"{NUMBER_OF_USERS}/{USER_STARTING_CREDIT}"
+        )
         async with session.post(url) as resp:
             await resp.json()
         logger.info("Users created")
         logger.info("Batch creating items ...")
-        url: str = (f"{STOCK_URL}/stock/batch_init/"
-                    f"{NUMBER_0F_ITEMS}/{ITEM_STARTING_STOCK}/{ITEM_PRICE}")
+        url: str = (
+            f"{STOCK_URL}/stock/batch_init/"
+            f"{NUMBER_0F_ITEMS}/{ITEM_STARTING_STOCK}/{ITEM_PRICE}"
+        )
         async with session.post(url) as resp:
             await resp.json()
         logger.info("Items created")
         logger.info("Batch creating orders ...")
-        url: str = (f"{ORDER_URL}/orders/batch_init/"
-                    f"{NUMBER_OF_ORDERS}/{NUMBER_0F_ITEMS}/{NUMBER_OF_USERS}/{ITEM_PRICE}")
+        url: str = (
+            f"{ORDER_URL}/orders/batch_init/"
+            f"{NUMBER_OF_ORDERS}/{NUMBER_0F_ITEMS}/{NUMBER_OF_USERS}/{ITEM_PRICE}"
+        )
         async with session.post(url) as resp:
             await resp.json()
         logger.info("Orders created")
