@@ -16,7 +16,7 @@ kind: Deployment
 metadata:
   name: user-deployment
 spec:
-  replicas: 1
+  replicas: 1  # Can be increased for scalability
   selector:
     matchLabels:
       component: user
@@ -36,14 +36,24 @@ spec:
             requests:
               memory: "1Gi"
               cpu: "1"
-          command: ["gunicorn"]
-          args: ["-b", "0.0.0.0:5000", "app:app"]
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for Redis Cluster..."
+              until redis-cli -h payment-redis-cluster -a redis cluster info | grep -q 'cluster_state:ok'; do
+                sleep 5
+              done
+              python kafka_consumer.py &
+              hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app
           ports:
             - containerPort: 5000
           env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
             - name: REDIS_HOST
               value: payment-redis-cluster
             - name: REDIS_PORT
-              value: '6379'
+              value: "6379"
             - name: REDIS_PASSWORD
               value: "redis"

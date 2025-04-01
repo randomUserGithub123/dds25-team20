@@ -36,20 +36,27 @@ spec:
             requests:
               memory: "1Gi"
               cpu: "1"
-          command: ["gunicorn"]
-          args: ["-b", "0.0.0.0:5000", "app:app"]
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for Redis Cluster..."
+              until redis-cli -h order-redis-cluster -a redis cluster info | grep -q 'cluster_state:ok'; do
+                sleep 5
+              done
+              python kafka_stock_consumer.py &
+              python kafka_payment_consumer.py &
+              hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app
           ports:
             - containerPort: 5000
           env:
             - name: GATEWAY_URL
               value: "http://192.168.49.2"
-            - name: USER_SERVICE_URL
-              value: "user-service"
-            - name: STOCK_SERVICE_URL
-              value: "stock-service"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
             - name: REDIS_HOST
-              value: order-redis-cluster
+              value: "order-redis-cluster"
             - name: REDIS_PORT
-              value: '6379'
+              value: "6379"
             - name: REDIS_PASSWORD
               value: "redis"

@@ -29,22 +29,30 @@ If you want to run the default tests, `test/test_microservices.py`, then adjust 
       1. `docker build -t order:latest ./order`
       2. `docker build -t stock:latest ./stock`
       3. `docker build -t user:latest ./payment`
-4. Deploy Redis with the helm script
-5. Apply deployments of service configs: `kubectl apply -f k8s/`
-6. If `GATEWAY_URL` needed: `minikube ip`
+4. `kubectl create namespace kafka`
+5. Strimzi: `kubectl create -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka`
+6. Kafka: `kubectl apply -f ./strimzi-kafka-config/kafka-helm-values.yaml -n kafka`
+7. Deploy Redis with the helm script: `./deploy-charts-minikube.sh`
+8. Apply deployments of service configs: `kubectl apply -f k8s/`
+9. If `GATEWAY_URL` needed: `minikube ip`
 
 #### DELETING
 1. `kubectl delete -f k8s/`
 2. For each service: 
-   1. `helm delete order-redis`
-   2. `helm delete stock-redis`
-   3. `helm delete payment-redis`
-3. For each service: 
-   1. `kubectl delete pvc --selector app.kubernetes.io/instance=order-redis`
-   2. `kubectl delete pvc --selector app.kubernetes.io/instance=stock-redis`
-   3. `kubectl delete pvc --selector app.kubernetes.io/instance=payment-redis`
-4. `minikube stop`
-5. `minikube delete --all`
+   1. `helm delete order-redis-cluster`
+   2. `helm delete stock-redis-cluster`
+   3. `helm delete payment-redis-cluster`
+3. Kafka: 
+   1. `kubectl delete -f ./strimzi-kafka-config/kafka-helm-values.yaml -n kafka`
+   2. `kubectl delete -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka`
+   3. `kubectl delete namespace kafka`
+4. For each service: 
+   1. `kubectl delete pvc --selector app.kubernetes.io/instance=order-redis-cluster`
+   2. `kubectl delete pvc --selector app.kubernetes.io/instance=stock-redis-cluster`
+   3. `kubectl delete pvc --selector app.kubernetes.io/instance=payment-redis-cluster`
+   4. `kubectl delete pvc --selector app.kubernetes.io/instance=kafka -n kafka`
+5. `minikube stop`
+6. `minikube delete --all`
 
 # Web-scale Data Management Project Template
 
