@@ -5,7 +5,7 @@ import os
 import random
 from tempfile import gettempdir
 
-from populate import NUMBER_OF_ORDERS
+from populate import NUMBER_OF_ORDERS, urls_path, abs_dir
 
 import aiohttp
 
@@ -16,9 +16,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-tmp_folder_path: str = os.path.join("wdm_consistency_test")
+tmp_folder_path: str = os.path.join(abs_dir, "wdm_consistency_test")
 
-with open(os.path.join("..", "urls.json")) as f:
+with open(urls_path) as f:
     urls = json.load(f)
     ORDER_URL = urls["ORDER_URL"]
     PAYMENT_URL = urls["PAYMENT_URL"]

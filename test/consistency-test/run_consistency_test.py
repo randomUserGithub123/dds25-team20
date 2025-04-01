@@ -5,7 +5,7 @@ import logging
 from tempfile import gettempdir
 
 from verify import verify_systems_consistency
-from populate import populate_databases
+from populate import populate_databases, abs_dir
 from stress import stress
 
 logging.basicConfig(
@@ -15,10 +15,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Consistency test")
 
-
 # create the tmp folder to store the logs, the users and the stock
 logger.info("Creating tmp folder...")
-temp_folder: str = os.path.join("wdm_consistency_test")
+temp_folder: str = os.path.join(abs_dir, "wdm_consistency_test")
 
 # if os.path.isdir(temp_folder):
 #     shutil.rmtree(temp_folder)

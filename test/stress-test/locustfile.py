@@ -4,11 +4,11 @@ import json
 
 from locust import HttpUser, SequentialTaskSet, constant, task
 
-from init_orders import NUMBER_OF_ORDERS
+from init_orders import NUMBER_OF_ORDERS, urls_path
 
 
 # replace the example urls and ports with the appropriate ones
-with open(os.path.join("..", "urls.json")) as f:
+with open(urls_path) as f:
     urls = json.load(f)
     ORDER_URL = urls["ORDER_URL"]
     PAYMENT_URL = urls["PAYMENT_URL"]

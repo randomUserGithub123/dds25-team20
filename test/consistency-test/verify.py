@@ -13,6 +13,7 @@ from populate import (
     ITEM_PRICE,
     NUMBER_OF_USERS,
     USER_STARTING_CREDIT,
+    urls_path,
 )
 
 
@@ -27,7 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-with open(os.path.join("..", "urls.json")) as f:
+with open(urls_path) as f:
     urls = json.load(f)
     ORDER_URL = urls["ORDER_URL"]
     PAYMENT_URL = urls["PAYMENT_URL"]
