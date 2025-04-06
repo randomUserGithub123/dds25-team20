@@ -234,42 +234,70 @@ async def checkout(order_id: str):
     order_status[order_id] = "PENDING"
     order_events[order_id] = asyncio.Event()
 
-    await producer.send(
-        "STOCK",
-        {
-            "order_id": order_id,
-            "items_quantities": items_quantities,
-            "user_id": order_entry.user_id,
-            "total_cost": order_entry.total_cost,
-            "event_type": STOCK_UPDATE_REQUESTED,
-        },
-    )
+    # Add timeout for waiting
+    timeout_future = asyncio.create_task(asyncio.sleep(30))  # 30 second timeout
+    event_future = asyncio.create_task(order_events[order_id].wait())
 
-    app.logger.info("[ORDER]: Published 'STOCK' topic for order: %s", order_id)
+    try:
+        await producer.send(
+            "STOCK",
+            {
+                "order_id": order_id,
+                "items_quantities": items_quantities,
+                "user_id": order_entry.user_id,
+                "total_cost": order_entry.total_cost,
+                "event_type": STOCK_UPDATE_REQUESTED,
+            },
+        )
 
-    await order_events[order_id].wait()
+        app.logger.info("[ORDER]: Published 'STOCK' topic for order: %s", order_id)
 
-    if order_status[order_id] == "FAILED":
-        await release_redis_lock(order_id)
-        del order_status[order_id]
-        del order_events[order_id]
-        abort(400, "User out of credit")
-    elif order_status[order_id] == "COMPLETED":
-        order_entry.paid = True
-        try:
-            await db.set(order_id, msgpack.encode(order_entry))
-        except redis.exceptions.RedisError:
+        done, pending = await asyncio.wait(
+                [event_future, timeout_future],
+                return_when=asyncio.FIRST_COMPLETED
+        )
+
+        for task in pending:
+                task.cancel()
+
+        if event_future not in done:
+            # Timeout occurred, publish rollback
+            app.logger.error("[ORDER]: Timeout waiting for stock service response")
             await release_redis_lock(order_id)
             del order_status[order_id]
             del order_events[order_id]
-            return abort(400, DB_ERROR_STR)
-        app.logger.debug("Checkout successful")
+            abort(500, "Stock service unavailable")
 
+        if order_status[order_id] == "FAILED":
+            await release_redis_lock(order_id)
+            del order_status[order_id]
+            del order_events[order_id]
+            abort(400, "User out of credit")
+        elif order_status[order_id] == "COMPLETED":
+            order_entry.paid = True
+            try:
+                await db.set(order_id, msgpack.encode(order_entry))
+            except redis.exceptions.RedisError:
+                await release_redis_lock(order_id)
+                del order_status[order_id]
+                del order_events[order_id]
+                return abort(400, DB_ERROR_STR)
+            app.logger.debug("Checkout successful")
+
+            await release_redis_lock(order_id)
+            del order_status[order_id]
+            del order_events[order_id]
+
+            return Response(f"Order: {order_id} completed", status=200)
+        
+    except Exception as e:
+        app.logger.error(f"Error during checkout: {e}")
         await release_redis_lock(order_id)
-        del order_status[order_id]
-        del order_events[order_id]
-
-        return Response(f"Order: {order_id} completed", status=200)
+        if order_id in order_status:
+            del order_status[order_id]
+        if order_id in order_events:
+            del order_events[order_id]
+        abort(500, "Error processing order")
 
 
 if __name__ == "__main__":

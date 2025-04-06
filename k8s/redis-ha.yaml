@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-ha
+spec:
+  serviceName: redis-ha
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis-ha
+  template:
+    metadata:
+      labels:
+        app: redis-ha
+    spec:
+      containers:
+      - name: redis
+        image: bitnami/redis-cluster:7.4
+        command:
+        - redis-server
+        - /opt/bitnami/redis/etc/redis.conf
+        - --cluster-enabled yes
+        - --cluster-config-file /data/nodes.conf
+        - --cluster-node-timeout 5000
+        - --appendonly yes
+        ports:
+        - containerPort: 6379
+          name: client
+        - containerPort: 16379
+          name: gossip
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        - name: redis-config
+          mountPath: /opt/bitnami/redis/etc
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi

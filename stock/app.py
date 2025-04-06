@@ -143,6 +143,14 @@ async def remove_stock(item_id: str, amount: int):
     await release_redis_lock(item_id)
     return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
 
+@app.get("/find/healthcheck")
+async def healthcheck():
+    try:
+        # Check if Redis connection works
+        await db.ping()
+        return jsonify({"status": "healthy"})
+    except redis.exceptions.RedisError:
+        abort(500, "Redis connection failed")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)

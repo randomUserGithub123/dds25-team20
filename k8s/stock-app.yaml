@@ -16,7 +16,7 @@ kind: Deployment
 metadata:
   name: stock-deployment
 spec:
-  replicas: 1  # Can be increased for scalability
+  replicas: 3  # 3 for fault tolerance
   selector:
     matchLabels:
       component: stock
@@ -24,6 +24,7 @@ spec:
     metadata:
       labels:
         component: stock
+        app: microservice
     spec:
       containers:
         - name: stock
@@ -36,6 +37,18 @@ spec:
             requests:
               memory: "1Gi"
               cpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /stock/find/healthcheck
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /stock/find/healthcheck
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 15
           command:
             - /bin/sh
             - -c
@@ -57,3 +70,13 @@ spec:
               value: "6379"
             - name: REDIS_PASSWORD
               value: "redis"
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: stock-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      component: stock

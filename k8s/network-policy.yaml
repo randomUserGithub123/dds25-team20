@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: microservices-network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: microservice  # Add this label to all your services
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: microservice
+    ports:
+    - protocol: TCP
+      port: 5000
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 5000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: microservice
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kafka

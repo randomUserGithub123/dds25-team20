@@ -23,10 +23,15 @@ async def consume_infinitely():
         auto_offset_reset="earliest",
         enable_auto_commit=True,
         value_deserializer=lambda m: msgpack.decode(m),
+        group_id="stock-consumer-group",  # Add consumer group
+        session_timeout_ms=30000,  # 30 seconds
+        heartbeat_interval_ms=10000,  # 10 seconds
     )
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         value_serializer=lambda m: msgpack.encode(m),
+        enable_idempotence=True,  # Enable exactly-once delivery
+        acks="all",
     )
 
     await consumer.start()
@@ -130,9 +135,14 @@ async def consume_infinitely():
                         message.value["total_cost"],
                     )
                 )
-    finally:
-        await consumer.stop()
-        await producer.stop()
+    except Exception as e:
+        print(f"Error in consumer: {e}")
+        if 'consumer' in locals():
+            await consumer.stop()
+        if 'producer' in locals():
+            await producer.stop()
+        await asyncio.sleep(5)
+        
 
 
 if __name__ == "__main__":

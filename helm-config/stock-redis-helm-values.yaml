@@ -6,4 +6,9 @@ usePassword: true
 password: "redis"
 
 persistence:
-  enabled: false
+  enabled: true  # Change from false to true
+  size: 10Gi
+  storageClass: "standard"
+
+metrics:
+  enabled: true
