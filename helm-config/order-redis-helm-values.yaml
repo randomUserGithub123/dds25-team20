@@ -1,9 +1,13 @@
 cluster:
   nodes: 6
-  replicas: 1
+  replicas: 2
 
 usePassword: true
 password: "redis"
 
 persistence:
-  enabled: false
+  enabled: true
+  size: 1Gi
+  
+metrics:
+  enabled: true

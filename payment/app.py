@@ -7,6 +7,9 @@ from quart import Quart, jsonify, abort, Response
 import redis
 from msgspec import msgpack, Struct
 
+from tenacity import retry, stop_after_attempt, wait_exponential
+from circuitbreaker import circuit
+
 PAYMENT_REQUESTED = "PaymentRequested"
 PAYMENT_COMPLETED = "PaymentCompleted"
 PAYMENT_FAILED = "PaymentFailed"
@@ -144,6 +147,66 @@ async def remove_credit(user_id: str, amount: int):
         f"User: {user_id} credit updated to: {user_entry.credit}", status=200
     )
 
+@app.route('/health')
+async def health_check():
+    try:
+        # Check Redis connection
+        await db.ping()
+        db_status = "healthy"
+    except redis.exceptions.RedisError:
+        db_status = "unhealthy"
+    
+    # Check Kafka connection
+    try:
+        kafka_status = "healthy" if producer and producer.is_connected() else "unhealthy"
+    except:
+        kafka_status = "unhealthy"
+    
+    status = all([db_status == "healthy", kafka_status == "healthy"])
+    return jsonify({
+        "status": "healthy" if status else "unhealthy",
+        "dependencies": {
+            "redis": db_status,
+            "kafka": kafka_status
+        }
+    }), 200 if status else 500
+
+@app.route('/ready')
+async def readiness_check():
+    return jsonify({"status": "ready"}), 200
+
+@circuit(failure_threshold=5, recovery_timeout=60)
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10)
+)
+async def process_payment_with_retry(user_id: str, amount: int) -> None:
+    try:
+        await remove_credit(user_id, amount)
+    except Exception as e:
+        app.logger.error(f"Payment processing error: {str(e)}")
+        raise
+
+async def handle_service_error(operation: str, error: Exception, context: dict):
+    app.logger.error(
+        f"{operation}_failed",
+        error=str(error),
+        error_type=type(error).__name__,
+        context=context
+    )
+    
+    # Implement compensating transaction if needed
+    if operation == "payment":
+        await rollback_payment(context["user_id"], context["amount"])
+    elif operation == "stock":
+        await revert_stock_change(context["item_id"], context["amount"])
+        
+    # Alert monitoring
+    await alert_monitoring_service(
+        service=operation,
+        error_type=type(error).__name__,
+        context=context
+    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)

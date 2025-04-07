@@ -16,7 +16,7 @@ kind: Deployment
 metadata:
   name: stock-deployment
 spec:
-  replicas: 1  # Can be increased for scalability
+  replicas: 3  # Can be increased for scalability
   selector:
     matchLabels:
       component: stock
@@ -25,8 +25,23 @@ spec:
       labels:
         component: stock
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: component
+                operator: In
+                values:
+                - stock
+            topologyKey: "kubernetes.io/hostname"
+      terminationGracePeriodSeconds: 60
       containers:
         - name: stock
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
           image: stock:latest
           imagePullPolicy: IfNotPresent
           resources:
@@ -57,3 +72,15 @@ spec:
               value: "6379"
             - name: REDIS_PASSWORD
               value: "redis"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5

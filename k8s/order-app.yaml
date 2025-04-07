@@ -10,13 +10,19 @@ spec:
     - port: 5000
       name: http
       targetPort: 5000
+  sessionAffinity: ClientIP
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: order-deployment
 spec:
-  replicas: 1
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       component: order
@@ -25,8 +31,23 @@ spec:
       labels:
         component: order
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: component
+                operator: In
+                values:
+                - order
+            topologyKey: "kubernetes.io/hostname"
+      terminationGracePeriodSeconds: 60
       containers:
         - name: order
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
           image: order:latest
           imagePullPolicy: IfNotPresent
           resources:
@@ -36,6 +57,24 @@ spec:
             requests:
               memory: "1Gi"
               cpu: "1"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            failureThreshold: 30
+            periodSeconds: 10
           command:
             - /bin/sh
             - -c

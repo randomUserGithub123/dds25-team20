@@ -11,6 +11,12 @@ import redis
 from msgspec import msgpack, Struct
 import aiohttp
 
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
+from circuitbreaker import circuit
+
+MAX_RETRIES = 3
+BACKOFF_MULTIPLIER = 1
+
 STOCK_UPDATE_REQUESTED = "StockUpdateRequested"
 STOCK_UPDATED = "StockUpdateSucceeded"
 STOCK_UPDATE_FAILED = "StockUpdateFailed"
@@ -270,6 +276,70 @@ async def checkout(order_id: str):
         del order_events[order_id]
 
         return Response(f"Order: {order_id} completed", status=200)
+
+@app.route('/health')
+async def health_check():
+    try:
+        # Check Redis connection
+        await db.ping()
+        db_status = "healthy"
+    except redis.exceptions.RedisError:
+        db_status = "unhealthy"
+    
+    # Check Kafka connection
+    try:
+        kafka_status = "healthy" if producer and producer.is_connected() else "unhealthy"
+    except:
+        kafka_status = "unhealthy"
+    
+    status = all([db_status == "healthy", kafka_status == "healthy"])
+    return jsonify({
+        "status": "healthy" if status else "unhealthy",
+        "dependencies": {
+            "redis": db_status,
+            "kafka": kafka_status
+        }
+    }), 200 if status else 500
+
+@app.route('/ready')
+async def readiness_check():
+    return jsonify({"status": "ready"}), 200
+
+@circuit(failure_threshold=5, recovery_timeout=60)
+@retry(
+    stop=stop_after_attempt(MAX_RETRIES),
+    wait=wait_exponential(multiplier=BACKOFF_MULTIPLIER, min=1, max=10)
+)
+async def call_stock_service(session, item_id: str) -> dict:
+    try:
+        async with session.get(f"{GATEWAY_URL}/stock/find/{item_id}") as resp:
+            if resp.status != 200:
+                raise Exception(f"Stock service error: {resp.status}")
+            return await resp.json()
+    except Exception as e:
+        app.logger.error(f"Stock service error: {str(e)}")
+        raise
+
+async def handle_service_error(operation: str, error: Exception, context: dict):
+    app.logger.error(
+        f"{operation}_failed",
+        error=str(error),
+        error_type=type(error).__name__,
+        context=context
+    )
+    
+    # Implement compensating transaction if needed
+    if operation == "payment":
+        await rollback_payment(context["user_id"], context["amount"])
+    elif operation == "stock":
+        await revert_stock_change(context["item_id"], context["amount"])
+        
+    # Alert monitoring
+    await alert_monitoring_service(
+        service=operation,
+        error_type=type(error).__name__,
+        context=context
+    )
 
 
 if __name__ == "__main__":
