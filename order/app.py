@@ -14,6 +14,10 @@ import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 from circuitbreaker import circuit
 
+import json
+from datetime import datetime
+
+
 MAX_RETRIES = 3
 BACKOFF_MULTIPLIER = 1
 
@@ -227,29 +231,61 @@ async def add_item(order_id: str, item_id: str, quantity: int):
 
 @app.post("/checkout/<order_id>")
 async def checkout(order_id: str):
+    state_manager = OrderState(order_id)
     await acquire_redis_lock(order_id)
 
-    app.logger.debug(f"Checking out {order_id}")
-    order_entry = await get_order_from_db(order_id)
-    app.logger.info("[ORDER]: Initiating checkout for order: %s", order_id)
+    try:
+        # Load order and save initial state
+        order_entry = await get_order_from_db(order_id)
+        await state_manager.save_state("STARTED", order_entry)
 
-    items_quantities = defaultdict(int)
-    for item_id, quantity in order_entry.items:
-        items_quantities[item_id] += quantity
+        items_quantities = defaultdict(int)
+        for item_id, quantity in order_entry.items:
+            items_quantities[item_id] += quantity
 
-    order_status[order_id] = "PENDING"
-    order_events[order_id] = asyncio.Event()
+        order_status[order_id] = "PENDING"
+        order_events[order_id] = asyncio.Event()
 
-    await producer.send(
-        "STOCK",
-        {
-            "order_id": order_id,
-            "items_quantities": items_quantities,
-            "user_id": order_entry.user_id,
-            "total_cost": order_entry.total_cost,
-            "event_type": STOCK_UPDATE_REQUESTED,
-        },
-    )
+        # Save state before stock update
+        await state_manager.save_state("STOCK_UPDATING", order_entry)
+
+        # Request stock update
+        await producer.send(
+            "STOCK",
+            {
+                "order_id": order_id,
+                "items_quantities": items_quantities,
+                "user_id": order_entry.user_id,
+                "total_cost": order_entry.total_cost,
+                "event_type": STOCK_UPDATE_REQUESTED,
+            },
+        )
+
+        await order_events[order_id].wait()
+
+        if order_status[order_id] == "FAILED":
+            await state_manager.save_state("FAILED", order_entry)
+            await rollback_order(order_id)
+            await release_redis_lock(order_id)
+            abort(400, "Checkout failed")
+
+        elif order_status[order_id] == "COMPLETED":
+            order_entry.paid = True
+            await db.set(order_id, msgpack.encode(order_entry))
+            await state_manager.save_state("COMPLETED", order_entry)
+            
+            await release_redis_lock(order_id)
+            return Response(f"Order: {order_id} completed", status=200)
+
+    except Exception as e:
+        await state_manager.save_state("ERROR", order_entry)
+        await rollback_order(order_id)
+        raise e
+    finally:
+        if order_id in order_status:
+            del order_status[order_id]
+        if order_id in order_events:
+            del order_events[order_id]
 
     app.logger.info("[ORDER]: Published 'STOCK' topic for order: %s", order_id)
 
@@ -276,6 +312,48 @@ async def checkout(order_id: str):
         del order_events[order_id]
 
         return Response(f"Order: {order_id} completed", status=200)
+
+async def rollback_order(order_id: str):
+    """Rollback an order to its previous state"""
+    state_manager = OrderState(order_id)
+    previous_state = await state_manager.load_state()
+    
+    if not previous_state:
+        app.logger.error(f"No state found for order {order_id}")
+        return
+
+    try:
+        # Revert stock changes
+        if previous_state["status"] in ["STOCK_UPDATING", "PAYMENT_PROCESSING"]:
+            order_data = previous_state["order"]
+            for item_id, quantity in order_data["items"]:
+                await producer.send(
+                    "STOCK",
+                    {
+                        "order_id": order_id,
+                        "items_quantities": {item_id: quantity},
+                        "event_type": "ROLLBACK_STOCK"
+                    }
+                )
+
+        # Revert payment if needed
+        if previous_state["status"] == "PAYMENT_PROCESSING":
+            order_data = previous_state["order"]
+            await producer.send(
+                "PAYMENT",
+                {
+                    "order_id": order_id,
+                    "user_id": order_data["user_id"],
+                    "amount": order_data["total_cost"],
+                    "event_type": "ROLLBACK_PAYMENT"
+                }
+            )
+
+        await state_manager.save_state("ROLLED_BACK", order_data)
+        
+    except Exception as e:
+        app.logger.error(f"Rollback failed for order {order_id}: {str(e)}")
+        raise
 
 @app.route('/health')
 async def health_check():
@@ -340,6 +418,41 @@ async def handle_service_error(operation: str, error: Exception, context: dict):
         error_type=type(error).__name__,
         context=context
     )
+
+class OrderState:
+    def __init__(self, order_id: str, state_dir: str = "/app/state"):
+        self.order_id = order_id
+        self.state_file = f"{state_dir}/{order_id}.json"
+        os.makedirs(state_dir, exist_ok=True)
+
+    async def save_state(self, status: str, order_entry: OrderValue):
+        """Save order state"""
+        try:
+            state = {
+                "status": status,
+                "timestamp": datetime.utcnow().isoformat(),
+                "order": {
+                    "paid": order_entry.paid,
+                    "items": order_entry.items,
+                    "user_id": order_entry.user_id,
+                    "total_cost": order_entry.total_cost
+                }
+            }
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f)
+        except Exception as e:
+            app.logger.error(f"Failed to save state: {str(e)}")
+
+    async def load_state(self) -> dict:
+        """Load order state"""
+        try:
+            if os.path.exists(self.state_file):
+                with open(self.state_file, 'r') as f:
+                    return json.load(f)
+            return None
+        except Exception as e:
+            app.logger.error(f"Failed to load state: {str(e)}")
+            return None
 
 
 if __name__ == "__main__":

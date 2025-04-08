@@ -42,8 +42,15 @@ spec:
                 - order
             topologyKey: "kubernetes.io/hostname"
       terminationGracePeriodSeconds: 60
+      volumes:
+        - name: state-storage
+          persistentVolumeClaim:
+            claimName: order-state-pvc
       containers:
         - name: order
+          volumeMounts:
+            - name: state-storage
+              mountPath: /app/state
           lifecycle:
             preStop:
               exec:

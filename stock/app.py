@@ -210,5 +210,51 @@ async def handle_service_error(operation: str, error: Exception, context: dict):
         context=context
     )
 
+class StockState:
+    def __init__(self, item_id: str, state_dir: str = "/app/state"):
+        self.item_id = item_id
+        self.state_file = f"{state_dir}/{item_id}.json"
+        os.makedirs(state_dir, exist_ok=True)
+
+    async def save_state(self, operation: str, stock: int, quantity: int):
+        try:
+            state = {
+                "operation": operation,
+                "timestamp": datetime.utcnow().isoformat(),
+                "previous_stock": stock,
+                "quantity": quantity
+            }
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f)
+        except Exception as e:
+            app.logger.error(f"Failed to save state: {str(e)}")
+
+@app.post("/subtract/<item_id>/<amount>")
+async def remove_stock(item_id: str, amount: int):
+    state_manager = StockState(item_id)
+    await acquire_redis_lock(item_id)
+
+    try:
+        item_entry = await get_item_from_db(item_id)
+        await state_manager.save_state("SUBTRACT_STARTED", item_entry.stock, int(amount))
+
+        item_entry.stock -= int(amount)
+        
+        if item_entry.stock < 0:
+            await state_manager.save_state("SUBTRACT_FAILED", item_entry.stock, int(amount))
+            abort(400, f"Item: {item_id} stock cannot get reduced below zero!")
+
+        await db.set(item_id, msgpack.encode(item_entry))
+        await state_manager.save_state("SUBTRACT_COMPLETED", item_entry.stock, int(amount))
+        
+        return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
+
+    except Exception as e:
+        await state_manager.save_state("ERROR", item_entry.stock, int(amount))
+        raise e
+    finally:
+        await release_redis_lock(item_id)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)

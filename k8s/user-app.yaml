@@ -42,8 +42,15 @@ spec:
                 - user
             topologyKey: "kubernetes.io/hostname"
       terminationGracePeriodSeconds: 60
+      volumes:
+        - name: state-storage
+          persistentVolumeClaim:
+            claimName: user-state-pvc
       containers:
         - name: user
+          volumeMounts:
+            - name: state-storage
+              mountPath: /app/state
           lifecycle:
             preStop:
               exec:
