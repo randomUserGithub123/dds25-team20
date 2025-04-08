@@ -58,7 +58,7 @@ services:
         echo 'Waiting for Redis cluster to be ready...';
         sleep 5;
       done; python kafka_stock_consumer.py & python kafka_payment_consumer.py &
-      hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app"
+      hypercorn -b 0.0.0.0:5000 -w 4 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/order_redis.env
     depends_on:
@@ -151,7 +151,7 @@ services:
         echo 'Waiting for Redis cluster to be ready...';
         sleep 5;
       done; python kafka_consumer.py &
-      hypercorn -b 0.0.0.0:5000 -w 1 --worker-class asyncio --log-level=info app:app"
+      hypercorn -b 0.0.0.0:5000 -w 4 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/stock_redis.env
     depends_on:
@@ -233,7 +233,7 @@ services:
 
   payment-service:
     build: ./payment
-    image: user:latest
+    image: payment:latest
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - REDIS_HOST=payment-redis-node-0
@@ -244,7 +244,7 @@ services:
         echo 'Waiting for Redis cluster to be ready...';
         sleep 5;
       done; python kafka_consumer.py &
-      hypercorn -b 0.0.0.0:5000 -w 1 --worker-class asyncio --log-level=info app:app"
+      hypercorn -b 0.0.0.0:5000 -w 4 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/payment_redis.env
     depends_on:

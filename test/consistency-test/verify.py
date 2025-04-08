@@ -12,8 +12,9 @@ from populate import (
     ITEM_STARTING_STOCK,
     ITEM_PRICE,
     NUMBER_OF_USERS,
+    PAYMENT_URL,
+    STOCK_URL,
     USER_STARTING_CREDIT,
-    urls_path,
 )
 
 
@@ -27,12 +28,6 @@ logging.basicConfig(
     datefmt="%I:%M:%S",
 )
 logger = logging.getLogger(__name__)
-
-with open(urls_path) as f:
-    urls = json.load(f)
-    ORDER_URL = urls["ORDER_URL"]
-    PAYMENT_URL = urls["PAYMENT_URL"]
-    STOCK_URL = urls["STOCK_URL"]
 
 
 async def get_and_get_field(session, url, field, key):

@@ -40,8 +40,8 @@ db = redis.asyncio.cluster.RedisCluster(
 )
 
 
-def close_db_connection() -> None:
-    asyncio.create_task(db.close())
+async def close_db_connection() -> None:
+    asyncio.create_task(await db.close())
 
 
 atexit.register(close_db_connection)
@@ -75,7 +75,6 @@ async def acquire_redis_lock(order_id: str):
 
     while True:
         try:
-
             result = await db.set(lock_key, lock_value, nx=True, ex=timeout)
             if result:
                 return True

@@ -16,7 +16,7 @@ kind: Deployment
 metadata:
   name: stock-deployment
 spec:
-  replicas: 1  # Can be increased for scalability
+  replicas: 3 # can be increased for scalability
   selector:
     matchLabels:
       component: stock
@@ -31,10 +31,10 @@ spec:
           imagePullPolicy: IfNotPresent
           resources:
             limits:
-              memory: "1Gi"
+              memory: "0.5Gi"
               cpu: "1"
             requests:
-              memory: "1Gi"
+              memory: "0.5Gi"
               cpu: "1"
           command:
             - /bin/sh
