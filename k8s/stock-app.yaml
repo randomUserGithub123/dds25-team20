@@ -16,7 +16,7 @@ kind: Deployment
 metadata:
   name: stock-deployment
 spec:
-  replicas: 3 # can be increased for scalability
+  replicas: 1 # can be increased for scalability
   selector:
     matchLabels:
       component: stock

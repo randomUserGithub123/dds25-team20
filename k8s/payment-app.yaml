@@ -16,7 +16,7 @@ kind: Deployment
 metadata:
   name: payment-deployment
 spec:
-  replicas: 2  # can be increased for scalability
+  replicas: 1  # can be increased for scalability
   selector:
     matchLabels:
       component: payment

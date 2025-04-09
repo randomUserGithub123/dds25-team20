@@ -40,6 +40,86 @@ spec:
 ---
 
 apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: paymentprocessing
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "PAYMENT_PROCESSING"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orderstatusupdate
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "ORDER_STATUS_UPDATE"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: stock
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "STOCK"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: stockprocessing
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "STOCK_PROCESSING"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payment
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "PAYMENT"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
   name: my-cluster
@@ -67,7 +147,7 @@ spec:
       transaction.state.log.min.isr: 1 # 2
       default.replication.factor: 1 # 3
       min.insync.replicas: 1 # at least 1 less than default.replication.factor
-      # mirror docker compose settings:
+      
       listener.security.protocol.map: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
       inter.broker.listener.name: "INTERNAL"
       advertised.listeners: "INTERNAL://my-cluster-kafka-brokers:9092,EXTERNAL://${HOST_IP}:31000"
