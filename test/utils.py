@@ -1,9 +1,20 @@
 import requests
+import os
+import json
+
+# use absolute path
+abs_dir = os.path.dirname(os.path.abspath(__file__))
+urls_path = os.path.join(abs_dir, "urls.json")
+
+with open(urls_path) as f:
+    urls = json.load(f)
+    ORDER_URL = urls["ORDER_URL"]
+    PAYMENT_URL = urls["PAYMENT_URL"]
+    STOCK_URL = urls["STOCK_URL"]
 
 # Adjust accordingly DEPENDING ON IF minikube/docker-compose is used
-minikube_url = "http://192.168.49.2:80"
-docker_compose_url = "http://127.0.0.1:8000"
-ORDER_URL = STOCK_URL = PAYMENT_URL = docker_compose_url
+# minikube_url = "http://192.168.49.2:80"
+# docker_compose_url = "http://127.0.0.1:8000"
 
 
 ########################################################################################################################

@@ -1,7 +1,7 @@
 import random
 import json
 
-from locust import FastHttpUser, HttpUser, SequentialTaskSet, constant, task
+from locust import FastHttpUser, SequentialTaskSet, constant, task
 
 from init_orders import NUMBER_OF_ORDERS, urls_path
 

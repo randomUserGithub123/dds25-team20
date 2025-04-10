@@ -57,7 +57,7 @@ services:
       sh -c "while ! redis-cli -h order-redis-node-0 -a redis cluster info | grep -q 'cluster_state:ok'; do
         echo 'Waiting for Redis cluster to be ready...';
         sleep 5;
-      done; python kafka_stock_consumer.py & python kafka_payment_consumer.py &
+      done; python rollback_consumer_stock.py & python rollback_consumer_payment.py & python consumer_stock.py & python consumer_payment.py &
       hypercorn -b 0.0.0.0:5000 -w 4 --worker-class asyncio --log-level=info app:app"
     env_file:
       - env/order_redis.env

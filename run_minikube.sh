@@ -1,36 +1,36 @@
 #!/bin/bash
 
 echo ""
-echo "Deleting service pods"
-echo ""
-kubectl delete -f k8s/
-
-echo ""
-echo "Deleting Redis clusters"
-echo ""
-helm delete order-redis-cluster
-helm delete stock-redis-cluster
-helm delete payment-redis-cluster
-
-echo ""
-echo "Stopping Kafka"
-echo ""
-kubectl delete -f ./strimzi-kafka-config/kafka-helm-values.yaml -n kafka
-kubectl delete -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
-kubectl delete namespace kafka
-
-echo ""
-echo "Deleting pvc of services"
-echo ""
-kubectl delete pvc --selector app.kubernetes.io/instance=order-redis-cluster
-kubectl delete pvc --selector app.kubernetes.io/instance=stock-redis-cluster
-kubectl delete pvc --selector app.kubernetes.io/instance=payment-redis-cluster
-kubectl delete pvc --selector app.kubernetes.io/instance=kafka -n kafka
-
-echo ""
 echo "Stopping minikube..."
 echo ""
 minikube stop
+
+# echo ""
+# echo "Deleting service pods"
+# echo ""
+# kubectl delete -f k8s/ --ignore-not-found=true
+
+# echo ""
+# echo "Deleting Redis clusters"
+# echo ""
+# helm delete order-redis-cluster --ignore-not-found
+# helm delete stock-redis-cluster --ignore-not-found
+# helm delete payment-redis-cluster --ignore-not-found
+
+# echo ""
+# echo "Stopping Kafka"
+# echo ""
+# kubectl delete -f ./strimzi-kafka-config/kafka-helm-values.yaml -n kafka --ignore-not-found=true
+# kubectl delete -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka --ignore-not-found=true
+# kubectl delete namespace kafka --ignore-not-found=true
+
+# echo ""
+# echo "Deleting pvc of services"
+# echo ""
+# kubectl delete pvc --selector app.kubernetes.io/instance=order-redis-cluster --ignore-not-found=true
+# kubectl delete pvc --selector app.kubernetes.io/instance=stock-redis-cluster --ignore-not-found=true
+# kubectl delete pvc --selector app.kubernetes.io/instance=payment-redis-cluster --ignore-not-found=true
+# kubectl delete pvc --selector app.kubernetes.io/instance=kafka -n kafka --ignore-not-found=true
 
 echo ""
 echo "Deleting minikube cluster..."

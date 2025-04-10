@@ -12,7 +12,7 @@ logging.basicConfig(
     format="%(levelname)s - %(asctime)s - %(name)s - %(message)s",
     datefmt="%I:%M:%S",
 )
-logger = logging.getLogger("Consistency test")
+logger = logging.getLogger("consistency")
 
 # create the tmp folder to store the logs, the users and the stock
 logger.info("Creating tmp folder...")

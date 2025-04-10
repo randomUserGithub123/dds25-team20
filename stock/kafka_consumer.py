@@ -15,13 +15,15 @@ STOCK_UPDATE_FAILED = "StockUpdateFailed"
 
 PAYMENT_FAILED = "PaymentFailed"
 
+ROLLBACK_STOCK_UPDATE = "RollbackStockUpdate"
+
 
 async def consume_infinitely():
     consumer = AIOKafkaConsumer(
         "STOCK",
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         auto_offset_reset="earliest",
-        enable_auto_commit=True,
+        enable_auto_commit=False,
         value_deserializer=lambda m: msgpack.decode(m),
     )
     producer = AIOKafkaProducer(
@@ -130,6 +132,22 @@ async def consume_infinitely():
                         message.value["total_cost"],
                     )
                 )
+
+            elif event_type == ROLLBACK_STOCK_UPDATE:
+                print(
+                    f"ROLLBACK_STOCK_UPDATE event of order: {message.value['order_id']}"
+                )
+                sys.stdout.flush()
+
+                asyncio.create_task(
+                    readd_stock(
+                        message.value["items_quantities"],
+                        message.value["order_id"],
+                        message.value["user_id"],
+                        message.value["total_cost"],
+                    )
+                )
+            await consumer.commit()
     finally:
         await consumer.stop()
         await producer.stop()

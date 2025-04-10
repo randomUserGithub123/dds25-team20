@@ -15,13 +15,14 @@ async def consume_infinitely_payment():
     consumer = AIOKafkaConsumer(
         "PAYMENT_PROCESSING",
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-        auto_offset_reset="earliest",
-        enable_auto_commit=True,
-        value_deserializer=lambda m: msgpack.decode(m)
+        auto_offset_reset="latest",
+        enable_auto_commit=False,
+        group_id="order-payment-consumer",
+        value_deserializer=lambda m: msgpack.decode(m),
     )
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-        value_serializer=lambda m: msgpack.encode(m)
+        value_serializer=lambda m: msgpack.encode(m),
     )
 
     await consumer.start()
@@ -30,23 +31,16 @@ async def consume_infinitely_payment():
     try:
         async for message in consumer:
             event_type = message.value["event_type"]
-            if(
-                event_type == PAYMENT_COMPLETED
-            ):
+            if event_type == PAYMENT_COMPLETED:
                 print(f"PAYMENT_COMPLETED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 
                 await producer.send(
                     "ORDER_STATUS_UPDATE",
-                    {
-                        "order_id": message.value['order_id'], 
-                        "status": 'COMPLETED'
-                    }
+                    {"order_id": message.value["order_id"], "status": "COMPLETED"},
                 )
 
-            elif(
-                event_type == PAYMENT_FAILED
-            ):
+            elif event_type == PAYMENT_FAILED:
                 print(f"PAYMENT_FAILED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 
@@ -57,13 +51,16 @@ async def consume_infinitely_payment():
                         "items_quantities": message.value["items_quantities"],
                         "user_id": message.value["user_id"],
                         "total_cost": message.value["total_cost"],
-                        "event_type": PAYMENT_FAILED
-                    }
+                        "event_type": PAYMENT_FAILED,
+                    },
                 )
+
+            await consumer.commit()
 
     finally:
         await consumer.stop()
         await producer.stop()
+
 
 if __name__ == "__main__":
     asyncio.run(consume_infinitely_payment())

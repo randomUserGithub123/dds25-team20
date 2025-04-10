@@ -1,4 +1,4 @@
-import os, sys
+import os
 import atexit
 import uuid
 import random
@@ -52,6 +52,19 @@ class OrderValue(Struct):
     items: list[tuple[str, int]]
     user_id: str
     total_cost: int
+
+
+LOG_FOLDER = "/data/order"
+os.makedirs(LOG_FOLDER, exist_ok=True)
+LOG_FILE = os.path.join(LOG_FOLDER, "order_log.csv")
+if not os.path.exists(LOG_FILE):
+    with open(LOG_FILE, "w") as f:
+        f.write("order_id,status\n")
+
+
+def write_to_log(order_id: str, status: str):
+    with open(LOG_FILE, "a") as f:
+        f.write(f"{order_id},{status}\n")
 
 
 async def get_order_from_db(order_id: str) -> OrderValue | None:
@@ -120,7 +133,6 @@ async def consume_order_status_updates():
     await consumer.start()
     try:
         async for message in consumer:
-
             order_id = message.value["order_id"]
             status = message.value["status"]
 
@@ -252,6 +264,8 @@ async def checkout(order_id: str):
         await release_redis_lock(order_id)
         del order_status[order_id]
         del order_events[order_id]
+        print(f"[ORDER] Checkout for order {order_id} FAILED")
+        write_to_log(order_id, "FAILED")
         abort(400, "User out of credit")
     elif order_status[order_id] == "COMPLETED":
         order_entry.paid = True
@@ -262,7 +276,8 @@ async def checkout(order_id: str):
             del order_status[order_id]
             del order_events[order_id]
             return abort(400, DB_ERROR_STR)
-        app.logger.debug("Checkout successful")
+        print(f"[ORDER] Checkout for order {order_id} SUCCESS")
+        write_to_log(order_id, "SUCCESS")
 
         await release_redis_lock(order_id)
         del order_status[order_id]

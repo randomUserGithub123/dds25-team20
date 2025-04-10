@@ -44,8 +44,9 @@ spec:
               until redis-cli -h order-redis-cluster -a redis cluster info | grep -q 'cluster_state:ok'; do
                 sleep 5
               done
-              python kafka_stock_consumer.py &
-              python kafka_payment_consumer.py &
+              python rollback_consumer_stock.py
+              python rollback_consumer_payment.py
+              python consumer_stock.py & python consumer_payment.py &
               hypercorn -b 0.0.0.0:5000 -w 2 --worker-class asyncio --log-level=info app:app
           ports:
             - containerPort: 5000
@@ -60,3 +61,10 @@ spec:
               value: "6379"
             - name: REDIS_PASSWORD
               value: "redis"
+          volumeMounts:
+            - name: order-storage
+              mountPath: /data/order
+      volumes:
+        - name: order-storage
+          persistentVolumeClaim:
+            claimName: order-pvc

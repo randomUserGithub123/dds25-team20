@@ -54,7 +54,6 @@ async def acquire_redis_lock(user_id: str):
 
     while True:
         try:
-
             result = await db.set(lock_key, lock_value, nx=True, ex=timeout)
             if result:
                 return True
@@ -106,7 +105,6 @@ async def batch_init_users(n: int, starting_money: int):
 async def find_user(user_id: str):
     user_entry = await get_user_from_db(user_id)
     return jsonify({"user_id": user_id, "credit": user_entry.credit})
-
 
 @app.post("/add_funds/<user_id>/<amount>")
 async def add_credit(user_id: str, amount: int):
