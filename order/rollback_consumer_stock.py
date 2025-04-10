@@ -60,8 +60,8 @@ async def replay_stock(processed_orders):
                         )
                 else:
                     pass  # no rollback
-    except:
-        print("[ORDER] No replayable stock found")
+    except Exception as e:
+        print(f"[ORDER] Error while replaying stock: {e}")
     finally:
         await consumer.stop()
         await producer.stop()

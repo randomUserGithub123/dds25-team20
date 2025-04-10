@@ -60,8 +60,8 @@ async def replay_payments(processed_orders):
                         )
                 else:
                     pass  # no rollback
-    except:
-        print("[ORDER] No replayable payments found")
+    except Exception as e:
+        print(f"[ORDER] Error while replaying payment: {e}")
     finally:
         await consumer.stop()
         await producer.stop()

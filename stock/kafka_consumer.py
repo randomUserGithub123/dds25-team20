@@ -1,6 +1,7 @@
 import os
 import sys
 import asyncio
+import redis
 
 from collections import defaultdict
 
@@ -17,6 +18,14 @@ PAYMENT_FAILED = "PaymentFailed"
 
 ROLLBACK_STOCK_UPDATE = "RollbackStockUpdate"
 
+# adding redis connection
+db = redis.asyncio.cluster.RedisCluster(
+    host=os.environ["REDIS_HOST"],
+    port=int(os.environ["REDIS_PORT"]),
+    password=os.environ["REDIS_PASSWORD"],
+    decode_responses=True,
+)
+
 
 async def consume_infinitely():
     consumer = AIOKafkaConsumer(
@@ -24,6 +33,7 @@ async def consume_infinitely():
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         auto_offset_reset="earliest",
         enable_auto_commit=False,
+        group_id="stock-consumer",
         value_deserializer=lambda m: msgpack.decode(m),
     )
     producer = AIOKafkaProducer(
@@ -37,6 +47,22 @@ async def consume_infinitely():
     async def try_update_stock(
         order_id: str, items_quantities: dict, user_id: str, total_cost: int
     ):
+        lock_key = str("payment_lock_" + order_id)
+
+        try:
+            result = await db.set(lock_key, "true", nx=True, ex=10)
+            if not result:
+                print(f"[STOCK] Payment for order {order_id} already being processed")
+                return
+            if await db.get(f"payment_processed_{order_id}") == "true":
+                print(
+                    f"[STOCK] Payment for order {order_id} already processed, skipping"
+                )
+                return
+        except redis.exceptions.RedisError as e:
+            print(f"[STOCK] Redis error: {e}")
+            return
+
         failed_stock_processing = False
         removed_items = defaultdict(int)
 
@@ -110,13 +136,11 @@ async def consume_infinitely():
                 )
                 sys.stdout.flush()
 
-                asyncio.create_task(
-                    try_update_stock(
-                        message.value["order_id"],
-                        message.value["items_quantities"],
-                        message.value["user_id"],
-                        message.value["total_cost"],
-                    )
+                await try_update_stock(
+                    message.value["order_id"],
+                    message.value["items_quantities"],
+                    message.value["user_id"],
+                    message.value["total_cost"],
                 )
             elif event_type == PAYMENT_FAILED:
                 print(
@@ -124,13 +148,11 @@ async def consume_infinitely():
                 )
                 sys.stdout.flush()
 
-                asyncio.create_task(
-                    readd_stock(
-                        message.value["items_quantities"],
-                        message.value["order_id"],
-                        message.value["user_id"],
-                        message.value["total_cost"],
-                    )
+                await readd_stock(
+                    message.value["items_quantities"],
+                    message.value["order_id"],
+                    message.value["user_id"],
+                    message.value["total_cost"],
                 )
 
             elif event_type == ROLLBACK_STOCK_UPDATE:
@@ -139,13 +161,11 @@ async def consume_infinitely():
                 )
                 sys.stdout.flush()
 
-                asyncio.create_task(
-                    readd_stock(
-                        message.value["items_quantities"],
-                        message.value["order_id"],
-                        message.value["user_id"],
-                        message.value["total_cost"],
-                    )
+                await readd_stock(
+                    message.value["items_quantities"],
+                    message.value["order_id"],
+                    message.value["user_id"],
+                    message.value["total_cost"],
                 )
             await consumer.commit()
     finally:

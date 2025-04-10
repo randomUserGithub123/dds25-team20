@@ -17,6 +17,7 @@ async def consume_infinitely_stock():
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         auto_offset_reset="earliest",
         enable_auto_commit=False,
+        group_id="order-stock-consumer",
         value_deserializer=lambda m: msgpack.decode(m),
     )
     producer = AIOKafkaProducer(

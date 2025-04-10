@@ -1,6 +1,7 @@
 import os
 import sys
 import asyncio
+import redis
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from msgspec import msgpack
@@ -14,6 +15,13 @@ PAYMENT_FAILED = "PaymentFailed"
 
 ROLLBACK_PAYMENT = "RollbackPayment"
 
+db = redis.asyncio.cluster.RedisCluster(
+    host=os.environ["REDIS_HOST"],
+    port=int(os.environ["REDIS_PORT"]),
+    password=os.environ["REDIS_PASSWORD"],
+    decode_responses=True,
+)
+
 
 async def consume_infinitely():
     consumer = AIOKafkaConsumer(
@@ -21,6 +29,7 @@ async def consume_infinitely():
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         auto_offset_reset="earliest",
         enable_auto_commit=False,
+        group_id="payment-consumer",
         value_deserializer=lambda m: msgpack.decode(m),
     )
 
@@ -35,6 +44,22 @@ async def consume_infinitely():
     async def try_make_payment(
         user_id: str, total_cost: int, order_id: str, items_quantities: dict
     ):
+        lock_key = str("payment_lock_" + order_id)
+
+        try:
+            result = await db.set(lock_key, "true", nx=True, ex=10)
+            if not result:
+                print(f"[PAYMENT] Payment for order {order_id} already being processed")
+                return
+            if await db.get(f"payment_processed_{order_id}") == "true":
+                print(
+                    f"[PAYMENT] Payment for order {order_id} already processed, skipping"
+                )
+                return
+        except redis.exceptions.RedisError as e:
+            print(f"[PAYMENT] Redis error: {e}")
+            return
+
         failed_payment_processing = False
 
         async with aiohttp.ClientSession() as session:
@@ -46,6 +71,12 @@ async def consume_infinitely():
                     sys.stdout.flush()
                     if resp.status >= 400:
                         raise Exception("Payment failed")
+                    try:
+                        await db.set(f"payment:{order_id}:processed", "true")
+                    except redis.exceptions.RedisError as e:
+                        print(f"Redis error marking payment as processed: {e}")
+                        failed_payment_processing = True
+
             except Exception as e:
                 print(e)
                 sys.stdout.flush()
@@ -76,13 +107,12 @@ async def consume_infinitely():
                 print(f"PAYMENT_REQUESTED event of order: {message.value['order_id']}")
                 sys.stdout.flush()
 
-                asyncio.create_task(
-                    try_make_payment(
-                        message.value["user_id"],
-                        message.value["total_cost"],
-                        message.value["order_id"],
-                        message.value["items_quantities"],
-                    )
+                # preventing race conditions
+                await try_make_payment(
+                    message.value["user_id"],
+                    message.value["total_cost"],
+                    message.value["order_id"],
+                    message.value["items_quantities"],
                 )
 
             elif event_type == ROLLBACK_PAYMENT:
@@ -106,6 +136,7 @@ async def consume_infinitely():
                         print(e)
 
             await consumer.commit()
+
     finally:
         await consumer.stop()
         await producer.stop()
