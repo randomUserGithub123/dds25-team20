@@ -1,31 +1,31 @@
 #!/bin/bash
 
-echo ""
-echo "Deleting service pods"
-echo ""
-kubectl delete -f k8s/
+# echo ""
+# echo "Deleting service pods"
+# echo ""
+# kubectl delete -f k8s/
 
-echo ""
-echo "Deleting Redis clusters"
-echo ""
-helm delete order-redis-cluster
-helm delete stock-redis-cluster
-helm delete payment-redis-cluster
+# echo ""
+# echo "Deleting Redis clusters"
+# echo ""
+# helm delete order-redis-cluster
+# helm delete stock-redis-cluster
+# helm delete payment-redis-cluster
 
-echo ""
-echo "Stopping Kafka"
-echo ""
-kubectl delete -f ./strimzi-kafka-config/kafka-helm-values.yaml -n kafka
-kubectl delete -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
-kubectl delete namespace kafka
+# echo ""
+# echo "Stopping Kafka"
+# echo ""
+# kubectl delete -f ./helm-config/kafka-helm-values.yaml -n kafka
+# kubectl delete -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
+# kubectl delete namespace kafka
 
-echo ""
-echo "Deleting pvc of services"
-echo ""
-kubectl delete pvc --selector app.kubernetes.io/instance=order-redis-cluster
-kubectl delete pvc --selector app.kubernetes.io/instance=stock-redis-cluster
-kubectl delete pvc --selector app.kubernetes.io/instance=payment-redis-cluster
-kubectl delete pvc --selector app.kubernetes.io/instance=kafka -n kafka
+# echo ""
+# echo "Deleting pvc of services"
+# echo ""
+# kubectl delete pvc --selector app.kubernetes.io/instance=order-redis-cluster
+# kubectl delete pvc --selector app.kubernetes.io/instance=stock-redis-cluster
+# kubectl delete pvc --selector app.kubernetes.io/instance=payment-redis-cluster
+# kubectl delete pvc --selector app.kubernetes.io/instance=kafka -n kafka
 
 echo ""
 echo "Stopping minikube..."
@@ -73,7 +73,7 @@ echo "Waiting for Strimzi operator to be ready..."
 kubectl wait --for=condition=Available deployment/strimzi-cluster-operator --timeout=300s -n kafka
 
 echo "Deploying Kafka cluster..."
-kubectl apply -f ./strimzi-kafka-config/kafka-helm-values.yaml -n kafka
+kubectl apply -f ./helm-config/kafka-helm-values.yaml -n kafka
 
 echo "Waiting for Kafka cluster to be ready..."
 kubectl wait kafka/my-cluster --for=condition=Ready --timeout=600s -n kafka
