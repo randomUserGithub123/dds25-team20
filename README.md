@@ -1,65 +1,98 @@
-## RUNNING THE PROJECT
-If you want to run the default tests, `test/test_microservices.py`, then adjust URL in the beginning of the `test/utils.py` accordingly.
+# Distributed data system project
+Team 20
 
-### docker-compose
+## Architecture
 
-#### Requirements
+We've built an event-driven microservices architecture. For handling distributed transactions, we used an orchestration-based SAGA pattern. The `Order` service acts as the orchestrator. If something fails, it just compensates by reversing the previous steps. The flow for checking out an order looks roughly like this:
+Order (`/checkout`) calls Stock with (`StockUpdateRequested`) and it responds either with `StockUpdated` or `StockUpdateFailed` then the Order service calls Payment with (`PaymentRequested`) and it responds either with `PaymentCompleted` or `PaymentFailed`. If both succeed, the Order service finishes the order checkout.
+
+Moreover, each service has its own Redis cluster (6 nodes per cluster). To keep things isolated inside the database, we used redis locks (a key-value pair inside the Redis database). Also, we used Kafka as the event bus. Topics include `STOCK`, `PAYMENT`, `PAYMENT_PROCESSING`, `STOCK_PROCESSING`, and `ORDER_STATUS_UPDATE`. Kafka also stores the event states, and the service are designed to be idempotent.
+
+Finally, everything runs on Kubernetes. The pods handle load balancing between services, and if a pod crashes, Kubernetes automatically spins up a new one to keep things running smoothly.
+
+## Requirements
 - [docker](https://docs.docker.com/engine/install/)
-- [docker-compose](https://docs.docker.com/compose/install/)
-
-#### Steps to run:
-1. `sudo docker-compose down -v`
-2. `sudo docker system prune -af --volumes`
-3. `sudo docker-compose up --build --remove-orphans`
-
-### minikube
-
-#### Requirements
 - [minikube](https://minikube.sigs.k8s.io/docs/start/?arch=%2Flinux%2Fx86-64%2Fstable%2Fbinary+download)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [helm](https://helm.sh/docs/intro/install/)
-- [docker](https://docs.docker.com/engine/install/)
 
-#### Steps to run:
-1. `minikube start --cpus=4 --memory=8192`
-2. `minikube addons enable ingress`
-3. Build local Docker images:
-   1. `eval $(minikube docker-env)`
-   2. For each service:
-      1. `docker build -t order:latest ./order`
-      2. `docker build -t stock:latest ./stock`
-      3. `docker build -t payment:latest ./payment`
-4. `kubectl create namespace kafka`
-5. Strimzi: `kubectl create -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka`
-6. Kafka: `kubectl apply -f ./strimzi-kafka-config/kafka-helm-values.yaml -n kafka`
-7. Deploy Redis with the helm script: `./deploy-charts-minikube.sh`
-8. Apply deployments of service configs: `kubectl apply -f k8s/`
-9. If `GATEWAY_URL` needed: `minikube ip`
+## Startup
+To start the minikube cluster, run:
+```bash
+./run_minikube.sh
+```
 
-#### DELETING
-1. `kubectl delete -f k8s/`
-2. For each service:
-   1. `helm delete order-redis-cluster`
-   2. `helm delete stock-redis-cluster`
-   3. `helm delete payment-redis-cluster`
-3. Kafka:
-   1. `kubectl delete -f ./strimzi-kafka-config/kafka-helm-values.yaml -n kafka`
-   2. `kubectl delete -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka`
-   3. `kubectl delete namespace kafka`
-4. For each service:
-   1. `kubectl delete pvc --selector app.kubernetes.io/instance=order-redis-cluster`
-   2. `kubectl delete pvc --selector app.kubernetes.io/instance=stock-redis-cluster`
-   3. `kubectl delete pvc --selector app.kubernetes.io/instance=payment-redis-cluster`
-   4. `kubectl delete pvc --selector app.kubernetes.io/instance=kafka -n kafka`
-5. `minikube stop`
-6. `minikube delete --all`
+> IMPORTANT: Take ingress' url (top one) and put it in the `test/urls.json`.
 
-# Web-scale Data Management Project Template
+## Testing
+* Install python 3.8 or greater (tested with 3.10 on Windows 11)
+* Install the required packages in the `test` folder using: `pip install -r requirements.txt`
+* Change the URLs and ports in the `urls.json` file with the one provided by ingress
 
-Basic project structure with Python's Flask and Redis.
-**You are free to use any web framework in any language and any database you like for this project.**
+> Note: For Windows users you might also need to install pywin32
 
-### Project structure
+### Consistency test
+
+In the provided consistency test we first populate the databases with 1 item with 100 stock that costs 1 credit
+and 1000 users that have 1 credit.
+
+Then we concurrently send 1000 checkouts of 1 item with random user/item combinations.
+If everything goes well only ~10% of the checkouts will succeed, and the expected state should be 0 stock in the item
+items and 100 credits subtracted across different users.
+
+Finally, the measurements are done in two phases:
+1) Using logs to see whether the service sent the correct message to the clients
+2) Querying the database to see if the actual state remained consistent
+
+#### Running
+* Run script `run_consistency_test.py`
+
+#### Interpreting results
+
+Wait for the script to finish and check how many inconsistencies you have in both the payment and stock services
+
+### Stress test
+
+To run the stress test you have to:
+
+1) Open a terminal and navigate to the `stress-test` folder.
+
+2) Run the `init_orders.py` to initialize the databases with the following data:
+
+```txt
+NUMBER_0F_ITEMS = 100_000
+ITEM_STARTING_STOCK = 1_000_000
+ITEM_PRICE = 1
+NUMBER_OF_USERS = 100_000
+USER_STARTING_CREDIT = 1_000_000
+NUMBER_OF_ORDERS = 100_000
+```
+
+3) Run script: `locust -f locustfile.py --host="localhost"`
+
+> Note: you can also set the --processes flag to increase the amount of locust worker processes.
+
+4) Go to `http://localhost:8089/` to use the Locust.io UI.
+
+
+To change the weight (task frequency) of the provided scenarios you can change the weights in the `tasks` definition (line 358)
+With our locust file each user will make one request between 1 and 15 seconds (you can change that in line 356).
+
+> You can also create your own scenarios as you like (https://docs.locust.io/en/stable/writing-a-locustfile.html)
+
+
+#### Using the Locust UI
+Fill in an appropriate number of users that you want to test with.
+The hatch rate is how many users will spawn per second
+(locust suggests that you should use less than 100 in local mode).
+
+#### Stress test with Kubernetes
+
+If you want to scale the `stress-test` to a Kubernetes clust you can follow the guide from
+Google's [Distributed load testing using Google Kubernetes Engine](https://cloud.google.com/architecture/distributed-load-testing-using-gke)
+and [original repo](https://github.com/GoogleCloudPlatform/distributed-load-testing-using-kubernetes).
+
+## Project structure
 
 * `env`
     Folder containing the Redis env variables for the docker-compose deployment
@@ -80,30 +113,4 @@ Basic project structure with Python's Flask and Redis.
     Folder containing the stock application logic and dockerfile.
 
 * `test`
-    Folder containing some basic correctness tests for the entire system. (Feel free to enhance them)
-
-### Deployment types:
-
-#### docker-compose (local development)
-
-After coding the REST endpoint logic run `docker-compose up --build` in the base folder to test if your logic is correct
-(you can use the provided tests in the `\test` folder and change them as you wish).
-
-***Requirements:*** You need to have docker and docker-compose installed on your machine.
-
-K8s is also possible, but we do not require it as part of your submission.
-
-#### minikube (local k8s cluster)
-
-This setup is for local k8s testing to see if your k8s config works before deploying to the cloud.
-First deploy your database using helm by running the `deploy-charts-minicube.sh` file (in this example the DB is Redis
-but you can find any database you want in https://artifacthub.io/ and adapt the script). Then adapt the k8s configuration files in the
-`\k8s` folder to mach your system and then run `kubectl apply -f .` in the k8s folder.
-
-***Requirements:*** You need to have minikube (with ingress enabled) and helm installed on your machine.
-
-#### kubernetes cluster (managed k8s cluster in the cloud)
-
-Similarly to the `minikube` deployment but run the `deploy-charts-cluster.sh` in the helm step to also install an ingress to the cluster.
-
-***Requirements:*** You need to have access to kubectl of a k8s cluster.
+    Folder containing some basic correctness tests for the entire system.
