@@ -14,9 +14,9 @@ Finally, everything runs on Kubernetes. The pods handle load balancing between s
 ## Contributions
 
 * Cem: (@zaturcem) architecture, fault tolerance
-* Ema: architecture document, architecture, payment fault tolerance.
-* Grgur:
-* Marko:
+* Ema: (@esujster) architecture document, architecture, payment fault tolerance.
+* Grgur: (@GrgurDuj) architecture document, SAGA, Kafka
+* Marko: (@l33tl4ng, @randomUserGithub123) architecture, Redis Cluster, Kafka, SAGA, switch from Flask to Quart, minikube config
 * Simon (@simonbiennier): architecture, minikube configuration, enhance and run consistency/stress tests, write scripts, write README
 
 ## Requirements
