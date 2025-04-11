@@ -13,7 +13,7 @@ Finally, everything runs on Kubernetes. The pods handle load balancing between s
 
 ## Contributions
 
-* Cem:
+* Cem: (@zaturcem) architecture, fault tolerance
 * Ema: architecture document, architecture, payment fault tolerance.
 * Grgur:
 * Marko:
