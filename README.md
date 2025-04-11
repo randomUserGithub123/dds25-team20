@@ -33,6 +33,10 @@ To start the minikube cluster, run:
 
 > IMPORTANT: Take ingress' url (top one) and put it in the `test/urls.json`.
 
+> There is a `.gif`, `run_minikube_gif.gif`, which shows how to run the script. Beware, that after running the script it might still take a while for all the pods to startup, as shown in the `.gif` with the couple of failed tests before it actually started.
+
+> OPTIONAL - Docker: `run_docker_gif.gif` shows how to run the project with Docker
+
 ## Testing
 * Install python 3.8 or greater (tested with 3.10 on Windows 11)
 * Install the required packages in the `test` folder using: `pip install -r requirements.txt`

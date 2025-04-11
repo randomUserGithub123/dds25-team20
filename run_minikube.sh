@@ -69,24 +69,42 @@ echo "Installing Strimzi operator..."
 echo ""
 kubectl create -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
 
+echo ""
 echo "Waiting for Strimzi operator to be ready..."
+echo "[CAN TAKE A WHILE]"
+echo ""
 kubectl wait --for=condition=Available deployment/strimzi-cluster-operator --timeout=300s -n kafka
 
+echo ""
 echo "Deploying Kafka cluster..."
+echo "[CAN TAKE A WHILE]"
+echo ""
 kubectl apply -f ./helm-config/kafka-helm-values.yaml -n kafka
 
+echo ""
 echo "Waiting for Kafka cluster to be ready..."
+echo "[CAN TAKE A WHILE]"
+echo ""
 kubectl wait kafka/my-cluster --for=condition=Ready --timeout=600s -n kafka
 
+echo ""
 echo "Verifying Kafka topics..."
+echo ""
 kubectl wait --for=condition=Ready --timeout=300s kafkatopic --all -n kafka
 
+echo ""
 echo "Deploying other services..."
+echo ""
 ./deploy-charts-minikube.sh
 kubectl apply -f k8s/
 
+echo ""
 echo "Waiting for services to be ready..."
+echo "[CAN TAKE A WHILE]"
+echo ""
 kubectl wait --for=condition=Available deployment --all --timeout=300s
 
+echo ""
 echo "Cluster is ready. Access via:"
+echo ""
 minikube service ingress-nginx-controller -n ingress-nginx --url
