@@ -11,6 +11,14 @@ Moreover, each service has its own Redis cluster (6 nodes per cluster). To keep 
 
 Finally, everything runs on Kubernetes. The pods handle load balancing between services, and if a pod crashes, Kubernetes automatically spins up a new one to keep things running smoothly.
 
+## Contributions
+
+* Cem: 
+* Ema: architecture document, architecture, payment fault tolerance.
+* Grgur:
+* Marko
+* Simon:
+
 ## Requirements
 - [docker](https://docs.docker.com/engine/install/)
 - [minikube](https://minikube.sigs.k8s.io/docs/start/?arch=%2Flinux%2Fx86-64%2Fstable%2Fbinary+download)
