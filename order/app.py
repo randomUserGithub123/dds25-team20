@@ -40,8 +40,8 @@ db = redis.asyncio.cluster.RedisCluster(
 )
 
 
-def close_db_connection() -> None:
-    asyncio.create_task(db.close())
+async def close_db_connection() -> None:
+    asyncio.create_task(await db.close())
 
 
 atexit.register(close_db_connection)
@@ -75,7 +75,6 @@ async def acquire_redis_lock(order_id: str):
 
     while True:
         try:
-
             result = await db.set(lock_key, lock_value, nx=True, ex=timeout)
             if result:
                 return True
@@ -223,9 +222,8 @@ async def add_item(order_id: str, item_id: str, quantity: int):
 async def checkout(order_id: str):
     await acquire_redis_lock(order_id)
 
-    app.logger.debug(f"Checking out {order_id}")
+    print(f"[ORDER]: Initiating check out for order {order_id}")
     order_entry = await get_order_from_db(order_id)
-    app.logger.info("[ORDER]: Initiating checkout for order: %s", order_id)
 
     items_quantities = defaultdict(int)
     for item_id, quantity in order_entry.items:
@@ -245,7 +243,7 @@ async def checkout(order_id: str):
         },
     )
 
-    app.logger.info("[ORDER]: Published 'STOCK' topic for order: %s", order_id)
+    print(f"[ORDER]: Published 'STOCK' topic for order: {order_id}")
 
     await order_events[order_id].wait()
 
@@ -263,7 +261,7 @@ async def checkout(order_id: str):
             del order_status[order_id]
             del order_events[order_id]
             return abort(400, DB_ERROR_STR)
-        app.logger.debug("Checkout successful")
+        print(f"[ORDER]: Checkout successful")
 
         await release_redis_lock(order_id)
         del order_status[order_id]

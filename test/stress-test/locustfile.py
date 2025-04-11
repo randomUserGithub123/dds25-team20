@@ -1,8 +1,7 @@
-import os.path
 import random
 import json
 
-from locust import HttpUser, SequentialTaskSet, constant, task
+from locust import FastHttpUser, HttpUser, SequentialTaskSet, constant, task
 
 from init_orders import NUMBER_OF_ORDERS, urls_path
 
@@ -30,7 +29,7 @@ class CreateAndCheckoutOrder(SequentialTaskSet):
                 response.success()
 
 
-class MicroservicesUser(HttpUser):
+class MicroservicesUser(FastHttpUser):
     # how much time a user waits (seconds) to run another TaskSequence (you could also use between (start, end))
     wait_time = constant(1)
     # [SequentialTaskSet]: [weight of the SequentialTaskSet]

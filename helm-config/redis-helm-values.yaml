@@ -1,0 +1,11 @@
+cluster:
+  init: true
+  nodes: 6
+  replicas: 1
+
+usePassword: true
+password: "redis"
+
+persistence:
+  enabled: true
+  size: 1Gi

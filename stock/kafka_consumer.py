@@ -1,6 +1,7 @@
 import os
 import sys
 import asyncio
+import redis
 
 from collections import defaultdict
 
@@ -14,6 +15,15 @@ STOCK_UPDATED = "StockUpdateSucceeded"
 STOCK_UPDATE_FAILED = "StockUpdateFailed"
 
 PAYMENT_FAILED = "PaymentFailed"
+
+ROLLBACK_STOCK_UPDATE = "RollbackStockUpdate"
+
+db = redis.asyncio.cluster.RedisCluster(
+    host=os.environ["REDIS_HOST"],
+    port=int(os.environ["REDIS_PORT"]),
+    password=os.environ["REDIS_PASSWORD"],
+    decode_responses=True,
+)
 
 
 async def consume_infinitely():
@@ -35,6 +45,18 @@ async def consume_infinitely():
     async def try_update_stock(
         order_id: str, items_quantities: dict, user_id: str, total_cost: int
     ):
+        lock_key = str("stock_lock_" + order_id)
+
+        try:
+            await db.set(lock_key, "true")
+            if await db.get(f"stock_processed_{order_id}") == "true":
+                print(
+                    f"[STOCK] Stock update for order {order_id} already processed, skipping"
+                )
+        except redis.exceptions.RedisError as e:
+            print(f"[STOCK] Redis error: {e}")
+            return
+
         failed_stock_processing = False
         removed_items = defaultdict(int)
 
@@ -119,6 +141,20 @@ async def consume_infinitely():
             elif event_type == PAYMENT_FAILED:
                 print(
                     f"STOCK_UPDATE_FAILED event of order: {message.value['order_id']}"
+                )
+                sys.stdout.flush()
+
+                asyncio.create_task(
+                    readd_stock(
+                        message.value["items_quantities"],
+                        message.value["order_id"],
+                        message.value["user_id"],
+                        message.value["total_cost"],
+                    )
+                )
+            elif event_type == ROLLBACK_STOCK_UPDATE:
+                print(
+                    f"ROLLBACK_STOCK_UPDATE event of order: {message.value['order_id']}"
                 )
                 sys.stdout.flush()
 

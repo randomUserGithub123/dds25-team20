@@ -1,0 +1,156 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: controller-pool
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  replicas: 1
+  roles:
+    - controller
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 2Gi
+        deleteClaim: false
+        kraftMetadata: shared
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: broker-pool
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  replicas: 1
+  roles:
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 2Gi
+        deleteClaim: false
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: paymentprocessing
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "PAYMENT_PROCESSING"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orderstatusupdate
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "ORDER_STATUS_UPDATE"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: stock
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "STOCK"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: stockprocessing
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "STOCK_PROCESSING"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payment
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: "PAYMENT"
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 7200000
+    cleanup.policy: "delete"
+
+---
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: my-cluster
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: 3.9.0
+    metadataVersion: 3.9-IV0
+    listeners:
+      - name: internal
+        port: 9092
+        type: internal
+        tls: false
+      - name: external
+        port: 9093
+        type: nodeport
+        tls: false
+    config:
+      auto.create.topics.enable: true
+      delete.topic.enable: false
+      offsets.topic.replication.factor: 1 # 3
+      transaction.state.log.replication.factor: 1 # 3
+      transaction.state.log.min.isr: 1 # 2
+      default.replication.factor: 1 # 3
+      min.insync.replicas: 1 # at least 1 less than default.replication.factor
+      
+      listener.security.protocol.map: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      inter.broker.listener.name: "INTERNAL"
+      advertised.listeners: "INTERNAL://my-cluster-kafka-brokers:9092,EXTERNAL://${HOST_IP}:31000"
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}

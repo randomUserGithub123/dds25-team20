@@ -12,6 +12,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+n = 10
 NUMBER_OF_ITEMS = 100_000
 ITEM_STARTING_STOCK = 1_000_000
 ITEM_PRICE = 1
@@ -33,7 +34,7 @@ with open(urls_path) as f:
 
 async def populate_databases():
     async with aiohttp.ClientSession() as session:
-        logger.info("Batch creating users...")
+        logger.info(f"Batch creating {NUMBER_OF_USERS} users...")
         url: str = (
             f"{PAYMENT_URL}/payment/batch_init/"
             f"{NUMBER_OF_USERS}/{USER_STARTING_CREDIT}"
@@ -41,7 +42,7 @@ async def populate_databases():
         async with session.post(url) as resp:
             await resp.json()
         logger.info("Users created")
-        logger.info("Batch creating items...")
+        logger.info(f"Batch creating {NUMBER_OF_ITEMS} items...")
         url: str = (
             f"{STOCK_URL}/stock/batch_init/"
             f"{NUMBER_OF_ITEMS}/{ITEM_STARTING_STOCK}/{ITEM_PRICE}"
@@ -49,7 +50,7 @@ async def populate_databases():
         async with session.post(url) as resp:
             await resp.json()
         logger.info("Items created")
-        logger.info("Batch creating orders...")
+        logger.info(f"Batch creating {NUMBER_OF_ORDERS} orders...")
         url: str = (
             f"{ORDER_URL}/orders/batch_init/"
             f"{NUMBER_OF_ORDERS}/{NUMBER_OF_ITEMS}/{NUMBER_OF_USERS}/{ITEM_PRICE}"

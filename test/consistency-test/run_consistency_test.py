@@ -2,7 +2,6 @@ import asyncio
 import os
 import shutil
 import logging
-from tempfile import gettempdir
 
 from verify import verify_systems_consistency
 from populate import populate_databases, abs_dir
@@ -18,6 +17,8 @@ logger = logging.getLogger("Consistency test")
 # create the tmp folder to store the logs, the users and the stock
 logger.info("Creating tmp folder...")
 temp_folder: str = os.path.join(abs_dir, "wdm_consistency_test")
+shutil.rmtree(temp_folder, ignore_errors=True)
+os.mkdir(temp_folder)
 
 # if os.path.isdir(temp_folder):
 #     shutil.rmtree(temp_folder)

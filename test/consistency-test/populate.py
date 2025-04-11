@@ -95,13 +95,13 @@ async def create_users(session, number_of_users: int, credit: int) -> List[str]:
 
 async def populate_databases():
     async with aiohttp.ClientSession() as session:
-        logger.info("Creating items ...")
+        logger.info(f"Creating {NUMBER_OF_ITEMS} items ...")
         item_ids: List[str] = await create_items(
             session, NUMBER_OF_ITEMS, ITEM_STARTING_STOCK, ITEM_PRICE
         )
-        logger.info("Items created")
+        logger.info(f"Items created")
 
-        logger.info("Creating users ...")
+        logger.info(f"Creating {NUMBER_OF_USERS} users ...")
         user_ids: List[str] = await create_users(
             session, NUMBER_OF_USERS, USER_STARTING_CREDIT
         )

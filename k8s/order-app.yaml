@@ -31,10 +31,10 @@ spec:
           imagePullPolicy: IfNotPresent
           resources:
             limits:
-              memory: "1Gi"
+              memory: "0.5Gi"
               cpu: "1"
             requests:
-              memory: "1Gi"
+              memory: "0.5Gi"
               cpu: "1"
           command:
             - /bin/sh
