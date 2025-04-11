@@ -125,7 +125,7 @@ async def add_credit(user_id: str, amount: int):
 async def remove_credit(user_id: str, amount: int):
     await acquire_redis_lock(user_id)
 
-    app.logger.debug(f"Removing {amount} credit from user: {user_id}")
+    print(f"[PAYMENT]: Removing {amount} credit from user {user_id}")
     user_entry = await get_user_from_db(user_id)
 
     user_entry.credit -= int(amount)

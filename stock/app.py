@@ -75,7 +75,7 @@ async def release_redis_lock(item_id: str):
 @app.post("/item/create/<price>")
 async def create_item(price: int):
     key = str(uuid.uuid4())
-    app.logger.debug(f"Item: {key} created")
+    print(f"[STOCK]: Item {key} created")
     value = msgpack.encode(StockValue(stock=0, price=int(price)))
     try:
         await db.set(key, value)
@@ -129,7 +129,7 @@ async def remove_stock(item_id: str, amount: int):
     item_entry: StockValue = await get_item_from_db(item_id)
 
     item_entry.stock -= int(amount)
-    app.logger.debug(f"Item: {item_id} stock updated to: {item_entry.stock}")
+    print(f"[STOCK]: Item {item_id} stock updated to {item_entry.stock}")
 
     if item_entry.stock < 0:
         await release_redis_lock(item_id)
