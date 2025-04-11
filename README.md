@@ -1,4 +1,5 @@
-# Distributed data system project
+# CS4550 Distributed Data Systems Project
+
 Team 20
 
 ## Architecture
