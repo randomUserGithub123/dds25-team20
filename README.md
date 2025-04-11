@@ -13,11 +13,11 @@ Finally, everything runs on Kubernetes. The pods handle load balancing between s
 
 ## Contributions
 
-* Cem: 
+* Cem:
 * Ema: architecture document, architecture, payment fault tolerance.
 * Grgur:
-* Marko
-* Simon:
+* Marko:
+* Simon (@simonbiennier): architecture, minikube configuration, enhance and run consistency/stress tests, write scripts, write README
 
 ## Requirements
 - [docker](https://docs.docker.com/engine/install/)
